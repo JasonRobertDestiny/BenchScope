@@ -272,6 +272,22 @@ Phase 2: 飞书卡片 + 一键添加按钮
 
 ## Development Commands
 
+**重要规则：本项目强制使用uv虚拟环境**
+
+所有Python命令必须使用uv虚拟环境执行：
+- ✅ 虚拟环境路径: `/mnt/d/VibeCoding_pgm/BenchScope/.venv`
+- ✅ 使用方式: `/mnt/d/VibeCoding_pgm/BenchScope/.venv/bin/python <script>`
+- ❌ 不要使用: `python` 或 `python3` (可能使用错误的Python环境)
+
+示例:
+```bash
+# ✅ 正确 - 使用uv虚拟环境
+/mnt/d/VibeCoding_pgm/BenchScope/.venv/bin/python src/main.py
+
+# ❌ 错误 - 可能使用系统Python
+python src/main.py
+```
+
 ### Initial Setup
 ```bash
 python3.11 -m venv venv                # 创建虚拟环境

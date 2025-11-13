@@ -27,6 +27,7 @@ class FeishuNotifier:
         self.webhook_url = webhook_url or self.settings.feishu.webhook_url
 
     async def notify(self, candidates: List[ScoredCandidate]) -> None:
+        """分层推送: 高优先级卡片 + 中优先级摘要"""
         if not self.webhook_url:
             logger.warning("未配置飞书Webhook,跳过通知")
             return
@@ -40,14 +41,29 @@ class FeishuNotifier:
             logger.info("无高分候选,跳过通知")
             return
 
+        # 分层处理
         high_priority = [c for c in qualified if c.priority == "high"]
-        # 发送所有high优先级候选（移除[:3]限制）
+        medium_priority = [c for c in qualified if c.priority == "medium"]
+
+        # 1. 推送所有高优先级卡片
         for candidate in high_priority:
             await self.send_card("🔥 发现高质量Benchmark候选", candidate)
             await asyncio.sleep(0.5)
 
-        summary = self._build_summary_text(qualified)
-        await self.send_text(summary)
+        # 2. 推送中优先级摘要 (新增)
+        if medium_priority:
+            await self._send_medium_priority_summary(medium_priority)
+            await asyncio.sleep(0.5)
+
+        # 3. 推送统计摘要卡片 (支持markdown)
+        summary_card = self._build_summary_card(qualified, high_priority, medium_priority)
+        await self._send_webhook(summary_card)
+
+        # 4. 日志记录推送统计
+        logger.info(
+            f"✅ 推送完成: 高优先级{len(high_priority)}条(卡片), "
+            f"中优先级{len(medium_priority)}条(摘要)"
+        )
 
     async def send_card(self, title: str, candidate: ScoredCandidate) -> None:
         """发送单条候选的卡片消息"""
@@ -65,17 +81,82 @@ class FeishuNotifier:
         payload = {"msg_type": "text", "content": {"text": message}}
         await self._send_webhook(payload)
 
-    def _build_summary_text(self, candidates: List[ScoredCandidate]) -> str:
-        high = sum(1 for c in candidates if c.priority == "high")
-        medium = sum(1 for c in candidates if c.priority == "medium")
-        avg_score = sum(c.total_score for c in candidates) / len(candidates)
-        return (
-            "本次采集完成:\n"
-            f"- 高优先级: {high} 条\n"
-            f"- 中优先级: {medium} 条\n"
-            f"- 平均分: {avg_score:.2f}/10\n"
-            "请查看卡片了解详细候选信息。"
+    async def _send_medium_priority_summary(self, candidates: List[ScoredCandidate]) -> None:
+        """发送中优先级候选摘要卡片 (Top 5详细列表)"""
+        top5 = sorted(candidates, key=lambda x: x.total_score, reverse=True)[:5]
+
+        # 构建lark_md格式内容
+        content = "📊 **本次中优先级候选** (6.0-7.9分):\n\n"
+        for i, c in enumerate(top5, 1):
+            title = c.title[:60] + "..." if len(c.title) > 60 else c.title
+            content += (
+                f"{i}. **{title}**\n"
+                f"   评分: {c.total_score:.2f}/10 | 来源: {c.source}\n"
+                f"   [查看详情]({c.url})\n\n"
+            )
+
+        if len(candidates) > 5:
+            content += (
+                f"其余 **{len(candidates)-5}** 条中优先级候选请在"
+                "[飞书表格](https://jcnqgpxcjdms.feishu.cn/base/WgI0bpHRVacs43skW24cR6JznWg)"
+                "查看"
+            )
+
+        # 构建交互式卡片
+        card = {
+            "msg_type": "interactive",
+            "card": {
+                "header": {
+                    "title": {"tag": "plain_text", "content": "中优先级候选摘要"},
+                    "template": "yellow",
+                },
+                "elements": [
+                    {"tag": "div", "text": {"tag": "lark_md", "content": content}},
+                    {
+                        "tag": "action",
+                        "actions": [
+                            {
+                                "tag": "button",
+                                "text": {"content": "📊 查看完整表格", "tag": "plain_text"},
+                                "url": "https://jcnqgpxcjdms.feishu.cn/base/WgI0bpHRVacs43skW24cR6JznWg?table=tblv2kzbzt4S2NSk&view=vewiJRxzFs",
+                                "type": "primary",
+                            }
+                        ],
+                    },
+                ],
+            },
+        }
+
+        await self._send_webhook(card)
+
+    def _build_summary_card(
+        self,
+        qualified: List[ScoredCandidate],
+        high_priority: List[ScoredCandidate],
+        medium_priority: List[ScoredCandidate],
+    ) -> dict:
+        """构建统计摘要卡片 (支持markdown渲染)"""
+        avg_score = sum(c.total_score for c in qualified) / len(qualified)
+        content = (
+            "📈 **本次采集完成**\n\n"
+            f"- 🔴 高优先级: {len(high_priority)} 条 (已发卡片)\n"
+            f"- 🟡 中优先级: {len(medium_priority)} 条 (已发摘要)\n"
+            f"- 📊 平均分: {avg_score:.2f}/10\n\n"
+            "详细候选请查看上方消息或飞书表格。"
         )
+
+        return {
+            "msg_type": "interactive",
+            "card": {
+                "header": {
+                    "title": {"tag": "plain_text", "content": "采集统计"},
+                    "template": "blue",
+                },
+                "elements": [
+                    {"tag": "div", "text": {"tag": "lark_md", "content": content}},
+                ],
+            },
+        }
 
     def _build_card(self, title: str, candidate: ScoredCandidate) -> dict:
         emoji = {"high": "🔴", "medium": "🟡", "low": "🟢"}.get(candidate.priority, "🟢")
