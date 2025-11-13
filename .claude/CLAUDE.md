@@ -410,63 +410,101 @@ logger.error(f"Notion写入失败: {error}")
 
 ## Implementation Phases
 
-**当前状态**: Phase 0 完成 → 准备进入 Phase 1 实施
+**当前状态**: Phase 2-5 已完成 ✅ → Phase 6 待开始 ⏭️
 
-### Phase 0 (已完成) - 设计阶段
+### Phase 0 (已完成) - 设计阶段 ✅
 - [x] 仓库初始化与需求分析
 - [x] PRD文档编写 (93/100质量分)
 - [x] 系统架构设计 (94/100质量分)
 - [x] 技术选型决策 (存储层: 飞书多维表格)
 - [x] Codex开发指令文档准备
 
-### Phase 1 (进行中,预计2周) - MVP实施
-**目标**: 跑通核心流程,验证技术可行性
+### Phase 1-2 (已完成) - MVP实施 ✅
+**完成时间**: 2025-11-02 ~ 2025-11-08
 
-- [ ] 数据模型定义 (`src/models.py`)
-- [ ] 配置管理 (`src/config.py`)
-- [ ] 数据采集器
-  - [ ] ArxivCollector (优先级最高)
-  - [ ] GitHubCollector
-  - [ ] PwCCollector
-- [ ] 规则预筛选 (`src/prefilter/rule_filter.py`)
-- [ ] 评分引擎
-  - [ ] RuleScorer (简单,先实现)
-  - [ ] LLMScorer (复杂,后实现)
-- [ ] 存储层
-  - [ ] SQLiteFallback (简单,先实现)
-  - [ ] FeishuStorage (复杂,后实现)
-  - [ ] StorageManager (组合)
-- [ ] 飞书通知 (`src/notifier/feishu_notifier.py`)
-- [ ] 主编排器 (`src/main.py`)
-- [ ] GitHub Actions工作流
-- [ ] 单元测试 + 手动测试
-- [ ] 文档更新 (`docs/test-report.md`)
+- [x] 数据模型定义 (`src/models.py`)
+- [x] 配置管理 (`src/config.py`)
+- [x] 数据采集器
+  - [x] ArxivCollector (⚠️ 存在超时问题)
+  - [x] GitHubCollector (⚠️ 采集质量需优化)
+  - [x] ~~PwCCollector~~ (已移除，Phase 3)
+  - [x] HuggingFaceCollector
+- [x] 规则预筛选 (`src/prefilter/rule_filter.py`)
+- [x] 评分引擎
+  - [x] LLMScorer (gpt-4o-mini)
+- [x] 存储层
+  - [x] SQLiteFallback
+  - [x] FeishuStorage
+  - [x] StorageManager (主备切换)
+- [x] 飞书通知 (`src/notifier/feishu_notifier.py`)
+- [x] 主编排器 (`src/main.py`)
+- [x] GitHub Actions工作流 (`.github/workflows/daily_collect.yml`)
+- [x] 单元测试 + 手动测试
 
-**验收标准**:
-- [ ] GitHub Actions每日自动运行
-- [ ] 数据采集成功率 > 95%
-- [ ] 飞书多维表格自动写入
-- [ ] 飞书通知每日推送
-- [ ] 执行时间 < 20分钟
-- [ ] LLM月成本 < ¥50
+**验收结果**:
+- [x] GitHub Actions每日自动运行 ✅
+- [x] 飞书多维表格自动写入 ✅
+- [x] 飞书通知每日推送 ✅
+- [x] 执行时间 < 20分钟 ✅ (实际79秒)
+- [x] LLM月成本 < ¥50 ✅ (预计¥15/月)
+- [ ] 数据采集成功率 > 95% ❌ (arXiv 0%, GitHub 100%, HF 0%)
 
-### Phase 2 (预计2周) - 增强功能
-- [ ] 并发采集优化 (asyncio.gather)
-- [ ] 并发评分优化 (semaphore限流)
-- [ ] 飞书卡片消息 (替代简单文本)
-- [ ] 一键添加按钮
-- [ ] Flask回调服务
-- [ ] 性能监控指标
+### Phase 3 (已完成) - 核心优化 ✅
+**完成时间**: 2025-11-13
+**详细文档**: `.claude/specs/benchmark-intelligence-agent/CODEX-COMPREHENSIVE-PLAN.md`
 
-### Phase 3 (预计1周) - 扩展数据源
-- [ ] HuggingFace数据集监控
-- [ ] AgentBench/HELM榜单跟踪
-- [ ] Twitter关键词监控(可选)
+- [x] 移除Papers with Code采集器
+- [x] 优化GitHub预筛选规则 (stars≥10, README≥500, 90天更新)
+- [x] 实现时间窗口过滤 (GitHub 30天, HuggingFace 14天, arXiv 7天)
+- [x] 创建日志分析工具 (`scripts/analyze_logs.py`)
+- [ ] ⏭️ 调整评分权重 (可选任务，已跳过)
 
-### Phase 4 (预计1周) - 版本跟踪
-- [ ] GitHub release监控
-- [ ] arXiv版本更新提醒
-- [ ] Leaderboard SOTA变化追踪
+### Phase 4 (已完成) - 版本跟踪 ✅
+**完成时间**: 2025-11-13
+
+- [x] GitHub Release监控 (`src/tracker/github_tracker.py`)
+- [x] arXiv版本更新提醒 (`src/tracker/arxiv_tracker.py`)
+- [x] GitHub Actions定时任务 (`.github/workflows/track_releases.yml`)
+- [ ] ⏭️ Leaderboard SOTA追踪 (可选任务，已跳过)
+
+### Phase 5 (已完成) - 增强功能 ✅
+**完成时间**: 2025-11-13
+
+- [x] 飞书卡片消息 (交互式卡片 + 按钮)
+- [ ] ⏭️ Flask回调服务 (可选任务，已跳过)
+- [ ] ⏭️ 候选池管理后台 (可选任务，已跳过)
+
+**Phase 2-5 总结**:
+- 核心任务完成率: 100% (7/7)
+- 可选任务完成率: 0% (0/4)
+- 代码质量: ⭐⭐⭐⭐⭐ (10/10)
+- 单元测试: 19/19 通过 ✅
+- 详细报告: `docs/codex-final-report.md`
+
+### Phase 6 (待开始) - 信息源扩展与数据完善 ⏭️
+**预计工期**: 2-3周
+**详细PRD**: `.claude/specs/benchmark-intelligence-agent/PHASE6-EXPANSION-PRD.md`
+**测试报告**: `docs/phase2-5-test-report.md`
+
+**核心任务**:
+- [ ] Task 6.1: 扩展会议论文采集 (Semantic Scholar + ACL Anthology)
+- [ ] Task 6.2: 接入评测榜单 (HELM + Open LLM Leaderboard + EvalPlus)
+- [ ] Task 6.3: 优化GitHub搜索策略 (排除awesome lists, 验证Benchmark特征)
+- [ ] Task 6.4: 完善飞书表格字段 (新增9个字段)
+- [ ] Task 6.5: 优化预筛选规则 (Benchmark特征检测)
+- [ ] Task 6.6: 优化LLM评分Prompt (区分工具vs Benchmark)
+
+**可选任务**:
+- [ ] Task 7.1: Twitter/X监听
+- [ ] Task 7.2: 飞书群聊集成
+- [ ] Task 7.3: HuggingFace Spaces监控
+
+**Phase 6 目标**:
+- 信息源覆盖: 30% → 80% (+167%)
+- 真实Benchmark占比: <20% → ≥60% (+200%)
+- 预筛选过滤率: 0% → 30-50%
+- 平均评分: 8.61 → 6.0-7.5
+- 数据字段完整性: 13/22 → 22/22 (+69%)
 
 ## Critical Constraints
 
@@ -509,11 +547,27 @@ logger.error(f"Notion写入失败: {error}")
   - 5层架构详解,完整代码示例,错误处理策略,性能成本分析
 - `.claude/specs/benchmark-intelligence-agent/CODEX-DEVELOPMENT-BRIEF.md` - Codex开发指令 (Phase 1-2)
   - MVP实施清单,代码规范,测试要求,验收标准
-- `.claude/specs/benchmark-intelligence-agent/CODEX-COMPREHENSIVE-PLAN.md` - **综合开发方案 (Phase 3-5)**
+- `.claude/specs/benchmark-intelligence-agent/CODEX-COMPREHENSIVE-PLAN.md` - **综合开发方案 (Phase 3-5)** ✅
   - **Phase 3**: 核心优化（GitHub预筛选、时间过滤、PwC移除、日志工具、评分权重）
   - **Phase 4**: 版本跟踪（GitHub Release、arXiv版本、Leaderboard SOTA）
   - **Phase 5**: 增强功能（飞书卡片消息、交互按钮）
   - 详细代码实现、验收标准、测试流程、开发顺序
+- `.claude/specs/benchmark-intelligence-agent/PHASE6-EXPANSION-PRD.md` - **Phase 6开发PRD** ⏭️
+  - **信息源扩展**: Semantic Scholar、HELM、Open LLM Leaderboard、ACL Anthology
+  - **采集质量优化**: GitHub搜索策略优化、Benchmark特征检测
+  - **数据完善**: 新增9个飞书字段（论文URL、数据集URL、评估指标等）
+  - **评分优化**: 增强预筛选规则、优化LLM评分Prompt
+  - 2-3周开发计划、完整验收标准、成本估算
+
+### 测试报告
+- `docs/phase2-5-test-report.md` - **Phase 2-5完整测试报告** (2025-11-13)
+  - Pipeline端到端测试结果
+  - 问题诊断与分析
+  - Phase 6改进建议
+- `docs/codex-final-report.md` - Codex开发完成报告
+  - Phase 3-5详细完成情况
+  - 代码质量评估
+  - Git提交记录
 
 ### 历史文档
 - `PRD_FINAL.md` - 原始产品需求文档 (已被BMAD PRD取代,仅供参考)
