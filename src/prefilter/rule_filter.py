@@ -18,9 +18,11 @@ def prefilter(candidate: RawCandidate) -> bool:
         logger.debug("过滤: 标题过短 - %s", candidate.title)
         return False
 
-    if not candidate.abstract or len(candidate.abstract.strip()) < 20:
-        logger.debug("过滤: 摘要过短 - %s", candidate.title)
-        return False
+    # 摘要长度要求：HuggingFace/HELM/Semantic Scholar来源豁免（官方数据源，描述本身较短）
+    if candidate.source not in {"helm", "semantic_scholar", "huggingface"}:
+        if not candidate.abstract or len(candidate.abstract.strip()) < 20:
+            logger.debug("过滤: 摘要过短 - %s", candidate.title)
+            return False
 
     if not candidate.url or not candidate.url.startswith(("http://", "https://")):
         logger.debug("过滤: URL无效 - %s", candidate.url)
