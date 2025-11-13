@@ -54,14 +54,32 @@ class HuggingFaceCollector:
         return await asyncio.to_thread(self._list_datasets)
 
     def _list_datasets(self) -> List[Any]:
-        search_query = " OR ".join(self.cfg.keywords)
-        datasets = self.api.list_datasets(
-            task_categories=self.cfg.task_categories,
-            search=search_query,
-            sort="lastModified",
-            limit=self.cfg.limit,
-        )
-        return list(datasets)
+        """列出HuggingFace数据集
+
+        注意1: 不使用task_categories过滤
+        原因: HuggingFace API对多个task_categories使用AND逻辑,
+              导致过滤过严(需要同时属于所有类别)
+
+        注意2: HuggingFace API不支持OR操作符
+        策略: 轮询每个关键词并合并去重
+        """
+        all_datasets = []
+        seen_ids = set()
+
+        for keyword in self.cfg.keywords:
+            datasets = self.api.list_datasets(
+                search=keyword,
+                sort="lastModified",
+                limit=self.cfg.limit,
+            )
+
+            for ds in datasets:
+                ds_id = getattr(ds, "id", None) or getattr(ds, "_id", None)
+                if ds_id and ds_id not in seen_ids:
+                    seen_ids.add(ds_id)
+                    all_datasets.append(ds)
+
+        return all_datasets
 
     def _normalize_dataset(self, dataset: Any) -> dict[str, Any]:
         """兼容 DatasetInfo/字典,统一输出字典"""
@@ -104,7 +122,9 @@ class HuggingFaceCollector:
             return None
 
         summary = self._extract_summary(data)
-        authors = data.get("cardData", {}).get("authors") or data.get("card_data", {}).get("authors")
+        # 安全访问嵌套字典：cardData可能为None
+        card_data = data.get("cardData") or data.get("card_data") or {}
+        authors = card_data.get("authors")
         publish_date = self._parse_datetime(
             data.get("lastModified")
             or data.get("last_modified")
@@ -115,9 +135,7 @@ class HuggingFaceCollector:
         # 时间过滤更适合GitHub（关注活跃维护）和arXiv（关注最新研究）
 
         return RawCandidate(
-            title=data.get("cardData", {}).get("pretty_name")
-            or data.get("card_data", {}).get("pretty_name")
-            or dataset_id,
+            title=card_data.get("pretty_name") or dataset_id,
             url=f"https://huggingface.co/datasets/{dataset_id}",
             source="huggingface",
             abstract=summary,
@@ -140,13 +158,36 @@ class HuggingFaceCollector:
         return str(data.get("description") or "")
 
     @staticmethod
-    def _parse_datetime(value: str | None) -> datetime | None:
+    def _parse_datetime(value: str | int | datetime | None) -> datetime | None:
+        """解析多种格式的时间戳
+
+        支持:
+        - ISO 8601字符串 ("2024-11-13T12:00:00Z")
+        - Unix时间戳 (整数)
+        - datetime对象 (直接返回)
+        """
         if not value:
             return None
-        try:
-            return datetime.fromisoformat(value.replace("Z", "+00:00"))
-        except ValueError:
-            return None
+
+        # 已经是datetime对象
+        if isinstance(value, datetime):
+            return value
+
+        # Unix时间戳（整数）
+        if isinstance(value, int):
+            try:
+                return datetime.fromtimestamp(value, tz=timezone.utc)
+            except (ValueError, OSError):
+                return None
+
+        # ISO 8601字符串
+        if isinstance(value, str):
+            try:
+                return datetime.fromisoformat(value.replace("Z", "+00:00"))
+            except ValueError:
+                return None
+
+        return None
 
     def _is_within_lookback(self, publish_date: datetime) -> bool:
         now = datetime.now(timezone.utc)
