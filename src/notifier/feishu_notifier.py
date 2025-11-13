@@ -41,7 +41,8 @@ class FeishuNotifier:
             return
 
         high_priority = [c for c in qualified if c.priority == "high"]
-        for candidate in high_priority[:3]:
+        # 发送所有high优先级候选（移除[:3]限制）
+        for candidate in high_priority:
             await self.send_card("🔥 发现高质量Benchmark候选", candidate)
             await asyncio.sleep(0.5)
 
@@ -95,12 +96,9 @@ class FeishuNotifier:
             },
             {
                 "tag": "button",
-                "text": {"content": "✅ 加入候选池", "tag": "plain_text"},
-                "value": {
-                    "action": "approve",
-                    "candidate_url": candidate.url,
-                },
-                "type": "primary",
+                "text": {"content": "📊 查看完整表格", "tag": "plain_text"},
+                "url": "https://jcnqgpxcjdms.feishu.cn/base/WgI0bpHRVacs43skW24cR6JznWg?table=tblv2kzbzt4S2NSk&view=vewiJRxzFs",
+                "type": "default",
             },
         ]
 

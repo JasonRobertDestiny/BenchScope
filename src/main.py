@@ -6,7 +6,13 @@ import logging
 from pathlib import Path
 from typing import List
 
-from src.collectors import ArxivCollector, GitHubCollector, HuggingFaceCollector
+from src.collectors import (
+    ArxivCollector,
+    GitHubCollector,
+    HelmCollector,
+    HuggingFaceCollector,
+    SemanticScholarCollector,
+)
 from src.config import Settings, get_settings
 from src.models import RawCandidate
 from src.notifier import FeishuNotifier
@@ -29,6 +35,8 @@ async def main() -> None:
     logger.info("[1/5] 数据采集...")
     collectors = [
         ArxivCollector(),
+        SemanticScholarCollector(),
+        HelmCollector(),
         GitHubCollector(),
         HuggingFaceCollector(settings=settings),
     ]
@@ -47,13 +55,27 @@ async def main() -> None:
         logger.warning("无采集数据,流程终止")
         return
 
-    # Step 1.5: 去重（过滤已推送的URL）
+    # Step 1.5: 去重（本次采集内部去重 + 过滤已推送的URL）
     logger.info("[1.5/5] URL去重...")
+
+    # 1. 本次采集内部去重（保留第一次出现）
+    seen_urls_this_batch: set[str] = set()
+    internal_deduplicated: List[RawCandidate] = []
+    for candidate in all_candidates:
+        if candidate.url not in seen_urls_this_batch:
+            seen_urls_this_batch.add(candidate.url)
+            internal_deduplicated.append(candidate)
+
+    internal_dup_count = len(all_candidates) - len(internal_deduplicated)
+    if internal_dup_count > 0:
+        logger.info("本次采集内部去重: 过滤%d条重复URL", internal_dup_count)
+
+    # 2. 与飞书已存在URL去重
     storage = StorageManager()
     existing_urls = await storage.get_existing_urls()
 
-    deduplicated = [c for c in all_candidates if c.url not in existing_urls]
-    duplicate_count = len(all_candidates) - len(deduplicated)
+    deduplicated = [c for c in internal_deduplicated if c.url not in existing_urls]
+    duplicate_count = len(internal_deduplicated) - len(deduplicated)
     logger.info("去重完成: 过滤%d条重复,保留%d条新发现\n", duplicate_count, len(deduplicated))
 
     if not deduplicated:

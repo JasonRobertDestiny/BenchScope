@@ -136,11 +136,16 @@ class LLMScorer:
         return scores
 
     def _build_prompt(self, candidate: RawCandidate) -> str:
+        # 构建具体的数据上下文
         github_info = ""
         if candidate.github_url:
             github_info = f"\nGitHub链接: {candidate.github_url}"
             if candidate.github_stars is not None:
-                github_info += f" (stars: {candidate.github_stars})"
+                github_info += f"\nGitHub Stars: {candidate.github_stars:,}"
+
+        # 提取具体的技术信息
+        task_info = f"\n任务类型: {candidate.task_type}" if candidate.task_type else ""
+        license_info = f"\nLicense: {candidate.license_type}" if candidate.license_type else ""
 
         return f"""请对以下AI Benchmark候选进行评分(0-10分,可保留一位小数)。
 
@@ -149,7 +154,7 @@ class LLMScorer:
 - 来源: {candidate.source}
 - URL: {candidate.url}
 - 摘要: {(candidate.abstract or 'N/A')[:500]}
-{github_info}
+{github_info}{task_info}{license_info}
 
 评分维度:
 1. 活跃度(activity_score): GitHub stars 与最近更新情况
@@ -158,6 +163,10 @@ class LLMScorer:
 4. 任务新颖性(novelty_score): 是否提供全新 Benchmark 或方法
 5. MGX适配度(relevance_score): 是否贴合多智能体/代码/工具使用场景
 
+**重要**: reasoning字段必须**基于上述具体数据**给出判断,格式如下:
+【活跃度】引用具体stars数字或更新时间；【可复现性】具体说明哪些资源开源(代码/数据/文档)；【许可合规】明确指出License类型；【新颖性】对比已有方法的具体区别；【MGX适配度】明确说明与多智能体/代码生成的关联。
+**禁止使用**"GitHub stars较高"、"近期有更新"等模糊描述,必须用具体数字和事实。
+
 请输出JSON,示例:
 {{
   "activity_score": 8.5,
@@ -165,7 +174,7 @@ class LLMScorer:
   "license_score": 10.0,
   "novelty_score": 7.0,
   "relevance_score": 8.0,
-  "reasoning": "【活跃度】GitHub stars较高/近期有更新；【可复现性】代码/数据开源情况；【许可合规】MIT/Apache/BSD等；【新颖性】相比已有任务的独特性；【MGX适配度】与多agent/代码生成的相关性"
+  "reasoning": "【活跃度】GitHub 326,329 stars，近30天有10+commits，社区活跃度极高；【可复现性】代码完全开源+详细文档+多语言支持，复现成本低；【许可合规】MIT License，符合商业使用；【新颖性】系统设计学习资源集合，非新Benchmark，复用已有知识；【MGX适配度】与多智能体直接相关性低，但对系统架构设计有参考价值"
 }}
 """
 
@@ -197,6 +206,13 @@ class LLMScorer:
             github_url=candidate.github_url,
             dataset_url=candidate.dataset_url,
             raw_metadata=candidate.raw_metadata,
+            # Phase 6新增字段：从RawCandidate复制到ScoredCandidate
+            paper_url=candidate.paper_url,
+            task_type=candidate.task_type,
+            license_type=candidate.license_type,
+            evaluation_metrics=candidate.evaluation_metrics,
+            reproduction_script_url=candidate.reproduction_script_url,
+            # 评分维度
             activity_score=scores["activity_score"],
             reproducibility_score=scores["reproducibility_score"],
             license_score=scores["license_score"],

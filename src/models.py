@@ -7,9 +7,14 @@ from typing import Dict, List, Literal, Optional
 
 from src.common import constants
 
-from src.common import constants
-
-SourceType = Literal["arxiv", "github", "pwc", "huggingface"]
+SourceType = Literal[
+    "arxiv",
+    "github",
+    "pwc",
+    "huggingface",
+    "semantic_scholar",
+    "helm",
+]
 
 
 @dataclass(slots=True)
@@ -26,6 +31,13 @@ class RawCandidate:
     github_url: Optional[str] = None
     dataset_url: Optional[str] = None
     raw_metadata: Dict[str, str] = field(default_factory=dict)
+
+    # Phase 6 新增字段（从采集器直接提取）
+    paper_url: Optional[str] = None  # 论文URL（arXiv/SemanticScholar自动填充）
+    task_type: Optional[str] = None  # 任务类型（从README/metadata提取）
+    license_type: Optional[str] = None  # License类型（GitHub API返回）
+    evaluation_metrics: Optional[List[str]] = None  # 评估指标（从摘要/README提取）
+    reproduction_script_url: Optional[str] = None  # 复现脚本链接（从README提取）
 
 
 @dataclass(slots=True)

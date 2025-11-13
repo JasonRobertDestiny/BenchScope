@@ -81,6 +81,7 @@ class ArxivCollector:
                     abstract=paper.summary,
                     authors=[author.name for author in paper.authors],
                     publish_date=paper.published,
+                    paper_url=paper.entry_id,  # arXiv论文页面链接
                     raw_metadata={
                         "arxiv_id": paper.entry_id.split("/")[-1],
                         "categories": ",".join(paper.categories or []),

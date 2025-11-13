@@ -22,6 +22,36 @@ GITHUB_TIMEOUT_SECONDS: Final[int] = 5
 GITHUB_MIN_STARS: Final[int] = 0
 GITHUB_LOOKBACK_DAYS: Final[int] = 30  # 30天窗口，新Benchmark创建频率低
 
+# Semantic Scholar配置
+SEMANTIC_SCHOLAR_LOOKBACK_YEARS: Final[int] = 2
+SEMANTIC_SCHOLAR_VENUES: Final[list[str]] = [
+    "NeurIPS",
+    "ICLR",
+    "ICML",
+    "ACL",
+    "EMNLP",
+    "CVPR",
+    "ICCV",
+    "KDD",
+    "WWW",
+]
+SEMANTIC_SCHOLAR_KEYWORDS: Final[list[str]] = [
+    "benchmark",
+    "evaluation",
+    "dataset",
+    "leaderboard",
+    "test set",
+]
+SEMANTIC_SCHOLAR_MAX_RESULTS: Final[int] = 100
+SEMANTIC_SCHOLAR_TIMEOUT_SECONDS: Final[int] = 15
+
+# HELM配置
+HELM_CONFIG_URL: Final[str] = "https://crfm.stanford.edu/helm/classic/latest/config.js"
+HELM_BASE_PAGE: Final[str] = "https://crfm.stanford.edu/helm/classic/latest/"
+HELM_STORAGE_BASE: Final[str] = "https://storage.googleapis.com/crfm-helm-public/benchmark_output"
+HELM_DEFAULT_RELEASE: Final[str] = "v0.4.0"
+HELM_TIMEOUT_SECONDS: Final[int] = 15
+
 # ---- Benchmark 关键词 ----
 BENCHMARK_KEYWORDS: Final[list[str]] = [
     "benchmark",

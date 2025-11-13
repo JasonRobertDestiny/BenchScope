@@ -31,7 +31,7 @@ class FeishuStorage:
         # 评分维度
         "activity_score": "活跃度",
         "reproducibility_score": "可复现性",
-        "license_score": "许可合规",
+        "license_score": "许可合规性",  # 修正: 飞书实际字段有"性"字
         "novelty_score": "任务新颖性",
         "relevance_score": "MGX适配度",
         "total_score": "总分",
@@ -39,13 +39,13 @@ class FeishuStorage:
         "reasoning": "评分依据",
         "status": "状态",
         # Phase 6 新增字段（必需，支撑"一键添加"核心目标）
-        "paper_url": "论文 URL",
+        "paper_url": "论文URL",  # 修正: 飞书实际字段无空格
         "github_stars": "GitHub Stars",
         "authors": "作者信息",
         "publish_date": "开源时间",
         "reproduction_script_url": "复现脚本链接",
-        "evaluation_metrics": "评价指标摘要",
-        "dataset_url": "数据集 URL",
+        "evaluation_metrics": "评估指标摘要",  # 修正: 飞书实际字段是"评估"不是"评价"
+        "dataset_url": "数据集URL",  # 修正: 飞书实际字段无空格
         "task_type": "任务类型",
         "license_type": "License类型",
     }
@@ -83,9 +83,30 @@ class FeishuStorage:
         try:
             resp = await client.post(url, headers=self._auth_header(), json={"records": records})
             resp.raise_for_status()
-            logger.info("飞书批次写入成功: %s条", len(records))
-        except httpx.HTTPStatusError as exc:  # noqa: BLE001
-            logger.error("飞书写入失败: %s - %s", exc.response.status_code, exc.response.text)
+
+            # 检查飞书API业务错误码
+            data = resp.json()
+            code = data.get("code")
+            msg = data.get("msg", "")
+
+            if code != 0:
+                # 飞书API业务层面错误
+                logger.error("飞书API业务错误: code=%s, msg=%s", code, msg)
+                logger.error("请求payload前3条记录: %s", records[:3])
+                raise FeishuAPIError(f"飞书API返回错误: {code} - {msg}")
+
+            # 检查实际写入的记录数
+            created_records = data.get("data", {}).get("records", [])
+            actual_count = len(created_records)
+            expected_count = len(records)
+
+            if actual_count != expected_count:
+                logger.warning("飞书写入数量不匹配: 预期%s条,实际%s条", expected_count, actual_count)
+
+            logger.info("飞书批次写入成功: %s条 (实际创建%s条)", len(records), actual_count)
+
+        except httpx.HTTPStatusError as exc:
+            logger.error("飞书写入HTTP错误: %s - %s", exc.response.status_code, exc.response.text)
             raise FeishuAPIError("批量写入失败") from exc
 
     async def _ensure_access_token(self) -> None:
@@ -153,7 +174,9 @@ class FeishuStorage:
             fields[self.FIELD_MAPPING["authors"]] = authors_str
 
         if hasattr(candidate, "publish_date") and candidate.publish_date:
-            fields[self.FIELD_MAPPING["publish_date"]] = candidate.publish_date.strftime("%Y-%m-%d")
+            # 飞书日期字段需要Unix时间戳(毫秒)
+            timestamp_ms = int(candidate.publish_date.timestamp() * 1000)
+            fields[self.FIELD_MAPPING["publish_date"]] = timestamp_ms
 
         if hasattr(candidate, "reproduction_script_url") and candidate.reproduction_script_url:
             fields[self.FIELD_MAPPING["reproduction_script_url"]] = {"link": candidate.reproduction_script_url}

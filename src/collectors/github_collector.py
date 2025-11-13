@@ -72,6 +72,10 @@ class GitHubCollector:
             readme_text = await self._fetch_readme(client, repo.get("full_name", ""))
             abstract = readme_text or repo.get("description")
 
+            # 提取License类型（Phase 6字段）
+            license_info = repo.get("license")
+            license_type = license_info.get("name") if license_info else None
+
             parsed.append(
                 RawCandidate(
                     title=repo.get("full_name", ""),
@@ -81,6 +85,7 @@ class GitHubCollector:
                     github_stars=stars,
                     github_url=repo.get("html_url"),
                     publish_date=self._parse_datetime(repo.get("pushed_at")),
+                    license_type=license_type,  # Phase 6: License类型（GitHub API返回）
                     raw_metadata={
                         "topic": topic,
                         "language": repo.get("language"),

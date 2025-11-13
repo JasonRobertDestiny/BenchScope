@@ -3,7 +3,7 @@
 BenchScope 是一个用于自动化收集 AI/Agent Benchmark 情报的异步流水线,负责完成“采集 → 预筛 → 评分 → 存储 → 通知”的闭环。
 
 ## 功能特性
-- 并发采集 arXiv/GitHub/HuggingFace 数据
+- 并发采集 arXiv/Semantic Scholar/HELM/GitHub/HuggingFace 数据
 - 规则预筛去重,过滤 40-60% 噪音
 - 集成 OpenAI gpt-4o-mini + Redis 缓存的 LLM 评分,失败回落规则评分
 - 飞书多维表格批量写入,SQLite 降级备份与回写
@@ -13,7 +13,7 @@ BenchScope 是一个用于自动化收集 AI/Agent Benchmark 情报的异步流�
 - GitHub Actions 定时调度,附日志与备份制品
 
 ## 快速开始
-1. 准备 `.env` (参考 `.env.example`),配置 OpenAI/飞书/Redis 等凭证。
+1. 准备 `.env` (参考 `.env.example`),配置 OpenAI/飞书/Redis 以及 `SEMANTIC_SCHOLAR_API_KEY`。
 2. 安装依赖:
    ```bash
    python -m pip install --upgrade pip
@@ -33,7 +33,7 @@ BenchScope 是一个用于自动化收集 AI/Agent Benchmark 情报的异步流�
 ## 目录结构
 ```
 src/
-  collectors/         # arXiv/GitHub/HuggingFace 采集器
+  collectors/         # arXiv/Semantic Scholar/HELM/GitHub/HuggingFace 采集器
   prefilter/          # 规则去重与过滤
   scorer/             # LLM评分 + 规则兜底
   storage/            # 飞书存储 + SQLite 降级

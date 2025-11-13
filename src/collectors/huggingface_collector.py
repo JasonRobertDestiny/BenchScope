@@ -134,6 +134,12 @@ class HuggingFaceCollector:
         # 不再过滤发布时间 - 让优质数据集不受时间限制
         # 时间过滤更适合GitHub（关注活跃维护）和arXiv（关注最新研究）
 
+        # Phase 6字段提取
+        # task_type: 从tags中提取task_categories (如"text-generation", "question-answering")
+        tags = data.get("tags") or []
+        task_tags = [t for t in tags if t.startswith("task_categories:")]
+        task_type = task_tags[0].replace("task_categories:", "") if task_tags else None
+
         return RawCandidate(
             title=card_data.get("pretty_name") or dataset_id,
             url=f"https://huggingface.co/datasets/{dataset_id}",
@@ -142,6 +148,7 @@ class HuggingFaceCollector:
             authors=authors,
             publish_date=publish_date,
             dataset_url=f"https://huggingface.co/datasets/{dataset_id}",
+            task_type=task_type,  # Phase 6: 任务类型（从tags提取）
             raw_metadata={
                 "downloads": data.get("downloads"),
                 "tags": data.get("tags"),
