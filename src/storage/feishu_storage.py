@@ -38,7 +38,7 @@ class FeishuStorage:
         "priority": "优先级",
         "reasoning": "评分依据",
         "status": "状态",
-        # 新增字段 (Phase 6)
+        # Phase 6 新增字段（必需，支撑"一键添加"核心目标）
         "paper_url": "论文 URL",
         "github_stars": "GitHub Stars",
         "authors": "作者信息",
@@ -47,6 +47,7 @@ class FeishuStorage:
         "evaluation_metrics": "评价指标摘要",
         "dataset_url": "数据集 URL",
         "task_type": "任务类型",
+        "license_type": "License类型",
     }
 
     def __init__(self, settings: Optional[Settings] = None) -> None:
@@ -167,6 +168,9 @@ class FeishuStorage:
 
         if hasattr(candidate, "task_type") and candidate.task_type:
             fields[self.FIELD_MAPPING["task_type"]] = candidate.task_type
+
+        if hasattr(candidate, "license_type") and candidate.license_type:
+            fields[self.FIELD_MAPPING["license_type"]] = candidate.license_type
 
         return {"fields": fields}
 
