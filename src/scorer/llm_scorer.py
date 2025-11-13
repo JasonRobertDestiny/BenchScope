@@ -91,7 +91,19 @@ class LLMScorer:
                 messages=[
                     {
                         "role": "system",
-                        "content": "你是一名AI Benchmark评审专家,负责严格量化候选项目。",
+                        "content": """你是一名AI Benchmark评审专家,负责严格量化候选项目。
+
+MGX背景知识:
+- MGX (https://mgx.dev) 是一个多智能体协作框架
+- 核心依赖: MetaGPT (https://github.com/FoundationAgents/MetaGPT)
+- 关注领域: 多智能体协作、代码生成、任务自动化、智能工作流
+- 相关技术: LangChain, AutoGPT, Agent框架, SOP工作流
+
+评估MGX适配度时,考虑:
+1. 是否直接评测多智能体系统性能
+2. 是否涉及代码生成/理解能力
+3. 是否包含任务规划/工具使用场景
+4. 是否可用于评估Agent协作效果""",
                     },
                     {"role": "user", "content": self._build_prompt(candidate)},
                 ],
