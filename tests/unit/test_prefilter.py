@@ -1,95 +1,94 @@
 """规则预筛选测试"""
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from src.models import RawCandidate
 from src.prefilter.rule_filter import prefilter, prefilter_batch
 
 
 def test_prefilter_valid_candidate():
-    candidate = RawCandidate(
-        title="AgentBench: Evaluating LLMs as Agents",
-        url="https://arxiv.org/abs/2308.03688",
-        source="arxiv",
-        abstract="We present AgentBench, a benchmark for evaluating LLMs as agents with multiple tasks.",
-        authors=["Author A"],
-        publish_date=datetime.now(timezone.utc),
-    )
+    candidate = _build_candidate()
     assert prefilter(candidate) is True
 
 
 def test_prefilter_short_title():
-    candidate = RawCandidate(
-        title="Short",
-        url="https://example.com",
-        source="arxiv",
-        abstract="This is a benchmark with enough description for testing.",
-    )
+    candidate = _build_candidate(title="Short")
     assert prefilter(candidate) is False
 
 
 def test_prefilter_no_abstract():
-    candidate = RawCandidate(
-        title="Valid Benchmark Title",
-        url="https://example.com",
-        source="arxiv",
-        abstract="",
-    )
+    candidate = _build_candidate(abstract="")
     assert prefilter(candidate) is False
 
 
 def test_prefilter_no_keywords():
-    candidate = RawCandidate(
+    candidate = _build_candidate(
         title="Unrelated topic",
-        url="https://example.com",
-        source="github",
         abstract="This describes something completely different, like weather forecasting systems.",
     )
     assert prefilter(candidate) is False
 
 
 def test_prefilter_invalid_url():
-    candidate = RawCandidate(
-        title="Benchmark with invalid url",
-        url="ftp://example.com",
-        source="github",
-        abstract="Benchmark paper with enough text to pass length requirements.",
-    )
+    candidate = _build_candidate(url="ftp://example.com")
     assert prefilter(candidate) is False
 
 
 def test_prefilter_invalid_source():
-    candidate = RawCandidate(
-        title="Benchmark from unknown source",
-        url="https://example.com",
-        source="unknown",
-        abstract="Benchmark content with enough length and keywords.",
-    )
+    candidate = _build_candidate(source="unknown")
     assert prefilter(candidate) is False
 
 
 def test_prefilter_batch():
     candidates = [
-        RawCandidate(
-            title="Valid Benchmark Paper",
-            url="https://example.com/1",
-            source="arxiv",
-            abstract="A benchmark evaluation paper with sufficient content.",
-        ),
-        RawCandidate(
-            title="Short",
-            url="https://example.com/2",
-            source="arxiv",
-            abstract="Valid abstract but short title.",
-        ),
-        RawCandidate(
-            title="Another Benchmark Dataset",
-            url="https://example.com/3",
-            source="github",
-            abstract="Dataset and evaluation benchmark with detailed description.",
-        ),
+        _build_candidate(),
+        _build_candidate(title="short"),
+        _build_github_candidate(url="https://example.com/3"),
     ]
-
     filtered = prefilter_batch(candidates)
     assert len(filtered) == 2
+
+
+def test_prefilter_github_quality_rules():
+    candidate = _build_github_candidate()
+    assert prefilter(candidate) is True
+
+    outdated = _build_github_candidate(
+        publish_date=datetime.now(timezone.utc) - timedelta(days=200)
+    )
+    assert prefilter(outdated) is False
+
+    short_readme = _build_github_candidate(abstract="short")
+    assert prefilter(short_readme) is False
+
+    few_stars = _build_github_candidate(github_stars=1)
+    assert prefilter(few_stars) is False
+
+
+def _build_candidate(**overrides) -> RawCandidate:
+    data = {
+        "title": "AgentBench: Evaluating LLMs as Agents",
+        "url": "https://arxiv.org/abs/2308.03688",
+        "source": "arxiv",
+        "abstract": "We present AgentBench, a benchmark for evaluating LLMs as agents with multiple tasks.",
+        "authors": ["Author A"],
+        "publish_date": datetime.now(timezone.utc),
+    }
+    data.update(overrides)
+    return RawCandidate(**data)
+
+
+def _build_github_candidate(**overrides) -> RawCandidate:
+    long_readme = "Benchmark README\n" * 50
+    data = {
+        "title": "open-source/benchmark",
+        "url": "https://github.com/open-source/benchmark",
+        "source": "github",
+        "abstract": long_readme,
+        "github_stars": 200,
+        "github_url": "https://github.com/open-source/benchmark",
+        "publish_date": datetime.now(timezone.utc),
+    }
+    data.update(overrides)
+    return RawCandidate(**data)

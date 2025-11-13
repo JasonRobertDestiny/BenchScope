@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+from datetime import datetime, timezone
 from typing import List
 
 from src.common import constants
@@ -11,7 +12,7 @@ logger = logging.getLogger(__name__)
 
 
 def prefilter(candidate: RawCandidate) -> bool:
-    """Phase 2 基线预筛选规则"""
+    """Phase 3 基线预筛选规则"""
 
     if not candidate.title or len(candidate.title.strip()) < 10:
         logger.debug("过滤: 标题过短 - %s", candidate.title)
@@ -25,7 +26,7 @@ def prefilter(candidate: RawCandidate) -> bool:
         logger.debug("过滤: URL无效 - %s", candidate.url)
         return False
 
-    valid_sources = ["arxiv", "github", "pwc", "huggingface"]
+    valid_sources = {"arxiv", "github", "huggingface"}
     if candidate.source not in valid_sources:
         logger.debug("过滤: 来源不在白名单 - %s", candidate.source)
         return False
@@ -34,6 +35,9 @@ def prefilter(candidate: RawCandidate) -> bool:
     matched = [kw for kw in constants.BENCHMARK_KEYWORDS if kw in text]
     if not matched:
         logger.debug("过滤: 无关键词命中 - %s", candidate.title)
+        return False
+
+    if candidate.source == "github" and not _is_quality_github_repo(candidate):
         return False
 
     logger.debug("通过: %s", candidate.title[:50])
@@ -55,3 +59,28 @@ def prefilter_batch(candidates: List[RawCandidate]) -> List[RawCandidate]:
         rate,
     )
     return filtered
+
+
+def _is_quality_github_repo(candidate: RawCandidate) -> bool:
+    """GitHub仓库需要满足stars、最近更新与README长度要求"""
+
+    stars = candidate.github_stars or 0
+    if stars < constants.PREFILTER_MIN_GITHUB_STARS:
+        logger.debug("GitHub stars不足: %s (%s)", candidate.title, stars)
+        return False
+
+    if not candidate.publish_date:
+        logger.debug("GitHub无最近更新时间: %s", candidate.title)
+        return False
+
+    now = datetime.now(timezone.utc)
+    if (now - candidate.publish_date).days > constants.PREFILTER_RECENT_DAYS:
+        logger.debug("GitHub更新时间过久: %s", candidate.title)
+        return False
+
+    readme_length = len(candidate.abstract or "")
+    if readme_length < constants.PREFILTER_MIN_README_LENGTH:
+        logger.debug("GitHub README过短: %s (%s字符)", candidate.title, readme_length)
+        return False
+
+    return True
