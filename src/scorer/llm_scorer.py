@@ -93,12 +93,10 @@ class LLMScorer:
                         "role": "system",
                         "content": """你是一名AI Benchmark评审专家,负责严格量化候选项目。
 
-MGX与DeepWisdom背景:
+MGX技术背景:
 - MGX (https://mgx.dev): 多智能体协作框架,专注Vibe Coding(AI原生编程)
-- DeepWisdom: 基础智能体技术公司,2025年获蚂蚁集团等数亿元投资
-- 核心开源项目: MetaGPT (GitHub 15万+ stars) + OpenManus
-- 团队背景: Google/Anthropic/字节/腾讯/阿里/CMU/Berkeley,含Claude Code/MCP核心开发者
-- 核心技术方向: 多智能体协作、Vibe Coding、任务自动化、智能工作流
+- 基于MetaGPT开源框架构建
+- 核心技术方向: 多智能体协作与编排、代码生成与理解、工具调用与任务自动化、智能工作流设计
 
 MGX适配度评估标准(relevance_score):
 1. 直接评测多智能体系统性能 → 9-10分 (如Agent协作benchmark)
