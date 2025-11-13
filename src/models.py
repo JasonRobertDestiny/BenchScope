@@ -5,6 +5,10 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Dict, List, Literal, Optional
 
+from src.common import constants
+
+from src.common import constants
+
 SourceType = Literal["arxiv", "github", "pwc", "huggingface"]
 
 
@@ -52,12 +56,13 @@ class ScoredCandidate:
     def total_score(self) -> float:
         """加权总分(0-10)"""
 
+        weights = constants.SCORE_WEIGHTS
         return (
-            self.activity_score * 0.25
-            + self.reproducibility_score * 0.30
-            + self.license_score * 0.20
-            + self.novelty_score * 0.15
-            + self.relevance_score * 0.10
+            self.activity_score * weights["activity"]
+            + self.reproducibility_score * weights["reproducibility"]
+            + self.license_score * weights["license"]
+            + self.novelty_score * weights["novelty"]
+            + self.relevance_score * weights["relevance"]
         )
 
     @property
@@ -70,3 +75,25 @@ class ScoredCandidate:
         if total >= 6.0:
             return "medium"
         return "low"
+
+
+@dataclass(slots=True)
+class GitHubRelease:
+    """GitHub Release版本信息"""
+
+    repo_url: str
+    tag_name: str
+    published_at: datetime
+    release_notes: str
+    html_url: str
+
+
+@dataclass(slots=True)
+class ArxivVersion:
+    """arXiv 论文版本信息"""
+
+    arxiv_id: str
+    version: str
+    updated_at: datetime
+    summary: str
+    url: str
