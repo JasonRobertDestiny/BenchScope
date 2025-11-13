@@ -59,11 +59,18 @@ class ArxivCollector:
     def _to_candidates(self, results: List[arxiv.Result]) -> List[RawCandidate]:
         """将arXiv返回转成内部数据结构"""
 
-        cutoff = datetime.now() - self.lookback
+        from datetime import timezone
+        cutoff = datetime.now(timezone.utc) - self.lookback
         candidates: List[RawCandidate] = []
 
         for paper in results:
-            if paper.published and paper.published < cutoff:
+            # 确保published是timezone-aware
+            published_dt = paper.published
+            if published_dt and published_dt.tzinfo is None:
+                # 如果是naive datetime，添加UTC时区
+                published_dt = published_dt.replace(tzinfo=timezone.utc)
+
+            if published_dt and published_dt < cutoff:
                 continue
 
             candidates.append(

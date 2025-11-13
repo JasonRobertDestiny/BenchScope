@@ -7,7 +7,7 @@ import os
 from datetime import datetime
 from typing import Any, List, Optional
 
-from huggingface_hub import DatasetFilter, HfApi
+from huggingface_hub import HfApi
 
 from src.config import Settings, get_settings
 from src.models import RawCandidate
@@ -53,10 +53,9 @@ class HuggingFaceCollector:
         return await asyncio.to_thread(self._list_datasets)
 
     def _list_datasets(self) -> List[Any]:
-        filter_cfg = DatasetFilter(task_categories=self.cfg.task_categories)
         search_query = " OR ".join(self.cfg.keywords)
         datasets = self.api.list_datasets(
-            filter=filter_cfg,
+            task_categories=self.cfg.task_categories,
             search=search_query,
             sort="lastModified",
             limit=self.cfg.limit,
@@ -134,4 +133,4 @@ class HuggingFaceCollector:
             return datetime.fromisoformat(value.replace("Z", "+00:00"))
         except ValueError:
             return None
-*** End
+
