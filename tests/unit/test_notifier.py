@@ -24,8 +24,11 @@ def _candidate(total: float = 8.5) -> ScoredCandidate:
 @pytest.mark.asyncio
 async def test_notifier_card_format(monkeypatch):
     notifier = FeishuNotifier(webhook_url="https://example.com/webhook")
-    card = notifier._build_card([_candidate()])
+    card = notifier._build_card("🔥 发现高质量Benchmark候选", _candidate())
 
     assert card["msg_type"] == "interactive"
-    assert "🎯 BenchScope" in card["card"]["header"]["title"]["content"]
-    assert len(card["card"]["elements"]) == 1
+    header = card["card"]["header"]
+    assert "🔥" in header["title"]["content"]
+    actions = card["card"]["elements"][1]["actions"]
+    assert len(actions) == 2
+    assert actions[0]["text"]["content"] == "查看详情"

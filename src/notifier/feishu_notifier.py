@@ -1,6 +1,7 @@
 """飞书Webhook通知"""
 from __future__ import annotations
 
+import asyncio
 import base64
 import hmac
 import hashlib
@@ -35,43 +36,85 @@ class FeishuNotifier:
             return
 
         qualified = [c for c in candidates if c.total_score >= constants.MIN_TOTAL_SCORE]
-        top_k = sorted(qualified, key=lambda c: c.total_score, reverse=True)[: constants.NOTIFY_TOP_K]
-
-        if not top_k:
+        if not qualified:
             logger.info("无高分候选,跳过通知")
             return
 
-        card = self._build_card(top_k)
+        high_priority = [c for c in qualified if c.priority == "high"]
+        for candidate in high_priority[:3]:
+            await self.send_card("🔥 发现高质量Benchmark候选", candidate)
+            await asyncio.sleep(0.5)
+
+        summary = self._build_summary_text(qualified)
+        await self.send_text(summary)
+
+    async def send_card(self, title: str, candidate: ScoredCandidate) -> None:
+        """发送单条候选的卡片消息"""
+
+        card = self._build_card(title, candidate)
         await self._send_webhook(card)
 
-    def _build_card(self, candidates: List[ScoredCandidate]) -> dict:
-        today = datetime.now().strftime("%Y-%m-%d")
-        elements = []
-        priority_emoji = {"high": "🔴", "medium": "🟡", "low": "🟢"}
+    async def send_text(self, message: str) -> None:
+        """发送纯文本消息"""
 
-        for idx, candidate in enumerate(candidates, 1):
-            emoji = priority_emoji.get(candidate.priority, "🟢")
-            content = (
-                f"**{idx}. {emoji} [{candidate.priority.upper()}] {candidate.title[:80]}**\n\n"  # 标题增加到80字符
-                f"总分: **{candidate.total_score:.1f}/10**\n"
-                f"来源: {candidate.source} | 活跃度: {candidate.activity_score:.1f} | 可复现性: {candidate.reproducibility_score:.1f}\n\n"
-                f"📊 {candidate.reasoning}\n\n"  # 完整显示，不截断
-                f"🔗 [查看详情]({candidate.url})\n---"
-            )
+        if not self.webhook_url:
+            logger.warning("未配置飞书Webhook,跳过通知")
+            return
 
-            elements.append({"tag": "div", "text": {"tag": "lark_md", "content": content}})
+        payload = {"msg_type": "text", "content": {"text": message}}
+        await self._send_webhook(payload)
+
+    def _build_summary_text(self, candidates: List[ScoredCandidate]) -> str:
+        high = sum(1 for c in candidates if c.priority == "high")
+        medium = sum(1 for c in candidates if c.priority == "medium")
+        avg_score = sum(c.total_score for c in candidates) / len(candidates)
+        return (
+            "本次采集完成:\n"
+            f"- 高优先级: {high} 条\n"
+            f"- 中优先级: {medium} 条\n"
+            f"- 平均分: {avg_score:.2f}/10\n"
+            "请查看卡片了解详细候选信息。"
+        )
+
+    def _build_card(self, title: str, candidate: ScoredCandidate) -> dict:
+        emoji = {"high": "🔴", "medium": "🟡", "low": "🟢"}.get(candidate.priority, "🟢")
+        content = (
+            f"**标题**: {candidate.title[:100]}\n"
+            f"**来源**: {candidate.source}\n"
+            f"**总分**: {candidate.total_score:.2f}/10 ({emoji} {candidate.priority})\n"
+            f"**活跃度**: {candidate.activity_score:.1f} | **可复现性**: {candidate.reproducibility_score:.1f}\n\n"
+            f"📊 **评分依据**:\n{candidate.reasoning[:400]}"
+        )
+
+        actions = [
+            {
+                "tag": "button",
+                "text": {"content": "查看详情", "tag": "plain_text"},
+                "url": candidate.url,
+                "type": "default",
+            },
+            {
+                "tag": "button",
+                "text": {"content": "✅ 加入候选池", "tag": "plain_text"},
+                "value": {
+                    "action": "approve",
+                    "candidate_url": candidate.url,
+                },
+                "type": "primary",
+            },
+        ]
 
         return {
             "msg_type": "interactive",
             "card": {
                 "header": {
-                    "title": {
-                        "tag": "plain_text",
-                        "content": f"🎯 BenchScope 每日推荐 ({today})",
-                    },
-                    "template": "blue",
+                    "title": {"tag": "plain_text", "content": title},
+                    "template": "blue" if candidate.priority == "high" else "green",
                 },
-                "elements": elements,
+                "elements": [
+                    {"tag": "div", "text": {"tag": "lark_md", "content": content}},
+                    {"tag": "action", "actions": actions},
+                ],
             },
         }
 
@@ -99,7 +142,10 @@ class FeishuNotifier:
             data = resp.json()
             if data.get("code") != 0:
                 raise RuntimeError(f"飞书Webhook返回错误: {data}")
-            logger.info("✅ 飞书通知推送成功: %d条", len(payload["card"]["elements"]))
+            if payload.get("msg_type") == "interactive":
+                logger.info("✅ 飞书卡片推送成功")
+            else:
+                logger.info("✅ 飞书文本推送成功")
 
     def _generate_signature(self, timestamp: int, secret: str) -> str:
         """生成飞书Webhook签名
