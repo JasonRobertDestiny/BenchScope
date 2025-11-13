@@ -123,16 +123,21 @@ redis-cli ping
 ```bash
 cd /mnt/d/VibeCoding_pgm/BenchScope
 
-# 1. 安装依赖
-pip install -r requirements.txt
+# 1. 安装uv (极速Python包管理器)
+curl -LsSf https://astral.sh/uv/install.sh | sh
 
-# 2. 验证配置
+# 2. 创建虚拟环境并安装依赖
+uv venv
+source .venv/bin/activate
+uv pip install -r requirements.txt
+
+# 3. 验证配置
 python -c "from src.config import get_settings; get_settings(); print('✓ 配置验证通过')"
 
-# 3. 运行单元测试
+# 4. 运行单元测试
 python -m pytest tests/unit -v
 
-# 4. 测试运行 (需完成飞书表格配置)
+# 5. 测试运行 (需完成飞书表格配置)
 python -m src.main
 ```
 

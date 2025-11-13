@@ -6,6 +6,7 @@ redis>=5.0.8
 tenacity>=8.3.0
 python-dotenv>=1.0.1
 pyyaml>=6.0.2
+huggingface_hub>=0.24.0
 pytest>=8.3.2
 pytest-asyncio>=0.24.0
 black>=24.8.0

@@ -1,13 +1,15 @@
 """全局配置加载逻辑"""
 from __future__ import annotations
 
+import logging
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from functools import lru_cache
 from pathlib import Path
 from typing import Optional
 
 from dotenv import load_dotenv
+import yaml
 
 from src.common import constants
 
@@ -43,12 +45,30 @@ class LoggingSettings:
 
 
 @dataclass(slots=True)
+class HuggingFaceSourceSettings:
+    keywords: list[str] = field(default_factory=lambda: constants.HUGGINGFACE_KEYWORDS.copy())
+    task_categories: list[str] = field(
+        default_factory=lambda: constants.HUGGINGFACE_TASK_CATEGORIES.copy()
+    )
+    min_downloads: int = constants.HUGGINGFACE_MIN_DOWNLOADS
+    limit: int = constants.HUGGINGFACE_MAX_RESULTS
+
+
+@dataclass(slots=True)
+class SourcesSettings:
+    huggingface: HuggingFaceSourceSettings = field(
+        default_factory=HuggingFaceSourceSettings
+    )
+
+
+@dataclass(slots=True)
 class Settings:
     openai: OpenAISettings
     redis: RedisSettings
     feishu: FeishuSettings
     logging: LoggingSettings
     sqlite_path: Path
+    sources: SourcesSettings
 
 
 def _get_env(key: str, default: Optional[str] = None) -> str:
@@ -68,6 +88,7 @@ def get_settings() -> Settings:
     log_dir.mkdir(parents=True, exist_ok=True)
 
     sqlite_path_str = os.getenv("SQLITE_DB_PATH", constants.SQLITE_DB_PATH)
+    sources_path = Path("config/sources.yaml")
 
     return Settings(
         openai=OpenAISettings(
@@ -88,6 +109,34 @@ def get_settings() -> Settings:
             directory=log_dir,
         ),
         sqlite_path=Path(sqlite_path_str),
+        sources=_load_sources_settings(sources_path),
+    )
+
+
+def _load_sources_settings(path: Path) -> SourcesSettings:
+    """从YAML加载数据源配置,异常时使用默认值"""
+
+    if not path.exists():
+        return SourcesSettings()
+
+    try:
+        data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    except Exception as exc:  # noqa: BLE001
+        logging.getLogger(__name__).warning("加载sources.yaml失败: %s", exc)
+        return SourcesSettings()
+
+    huggingface_cfg = data.get("huggingface", {})
+    return SourcesSettings(
+        huggingface=HuggingFaceSourceSettings(
+            keywords=huggingface_cfg.get("keywords")
+            or constants.HUGGINGFACE_KEYWORDS.copy(),
+            task_categories=huggingface_cfg.get("task_categories")
+            or constants.HUGGINGFACE_TASK_CATEGORIES.copy(),
+            min_downloads=int(
+                huggingface_cfg.get("min_downloads", constants.HUGGINGFACE_MIN_DOWNLOADS)
+            ),
+            limit=int(huggingface_cfg.get("limit", constants.HUGGINGFACE_MAX_RESULTS)),
+        )
     )
 
 

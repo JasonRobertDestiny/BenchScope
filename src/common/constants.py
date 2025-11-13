@@ -27,6 +27,19 @@ PWC_QUERY_KEYWORDS: Final[list[str]] = ["coding", "agent", "reasoning"]
 PWC_MIN_TASK_PAPERS: Final[int] = 3
 PWC_PAGE_SIZE: Final[int] = 20
 
+HUGGINGFACE_KEYWORDS: Final[list[str]] = [
+    "benchmark",
+    "evaluation",
+    "leaderboard",
+]
+HUGGINGFACE_TASK_CATEGORIES: Final[list[str]] = [
+    "text-generation",
+    "question-answering",
+    "code",
+]
+HUGGINGFACE_MIN_DOWNLOADS: Final[int] = 100
+HUGGINGFACE_MAX_RESULTS: Final[int] = 50
+
 # ---- Prefilter 配置 ----
 PREFILTER_SIMILARITY_THRESHOLD: Final[float] = 0.9
 PREFILTER_MIN_GITHUB_STARS: Final[int] = 50
@@ -35,7 +48,7 @@ PREFILTER_MIN_GITHUB_STARS: Final[int] = 50
 LLM_DEFAULT_MODEL: Final[str] = "gpt-4o-mini"
 LLM_TIMEOUT_SECONDS: Final[int] = 30
 LLM_CACHE_TTL_SECONDS: Final[int] = 7 * 24 * 3600
-SCORE_CONCURRENCY: Final[int] = 5
+SCORE_CONCURRENCY: Final[int] = 10
 REDIS_DEFAULT_URL: Final[str] = "redis://localhost:6379/0"
 RULE_SCORE_THRESHOLDS: Final[dict[int, int]] = {
     1000: 8,

@@ -1,6 +1,7 @@
 """GitHub Trending采集器"""
 from __future__ import annotations
 
+import asyncio
 import logging
 from datetime import datetime
 from typing import List
@@ -29,23 +30,35 @@ class GitHubCollector:
         candidates: List[RawCandidate] = []
 
         async with httpx.AsyncClient(timeout=self.timeout) as client:
-            for topic in self.topics:
-                url = f"{self.base_url}/{topic}?since=daily&spoken_language_code=en"
-                try:
-                    resp = await client.get(url)
-                    resp.raise_for_status()
-                except httpx.TimeoutException:
-                    logger.warning("GitHub Trending 超时: %s", topic)
-                    continue
-                except httpx.HTTPStatusError as exc:  # noqa: BLE001
-                    logger.error("GitHub Trending 响应异常(%s): %s", topic, exc)
-                    continue
+            tasks = [self._fetch_topic(client, topic) for topic in self.topics]
+            results = await asyncio.gather(*tasks, return_exceptions=True)
 
-                topic_candidates = self._parse_html(resp.text, topic)
-                candidates.extend(topic_candidates)
+        for topic, result in zip(self.topics, results, strict=False):
+            if isinstance(result, Exception):
+                logger.error("GitHub Trending 任务失败(%s): %s", topic, result)
+                continue
+            candidates.extend(result)
 
         logger.info("GitHub采集完成,候选总数%s", len(candidates))
         return candidates
+
+    async def _fetch_topic(
+        self, client: httpx.AsyncClient, topic: str
+    ) -> List[RawCandidate]:
+        """并发抓取单个主题,提升整体吞吐"""
+
+        url = f"{self.base_url}/{topic}?since=daily&spoken_language_code=en"
+        try:
+            resp = await client.get(url)
+            resp.raise_for_status()
+        except httpx.TimeoutException as exc:  # noqa: BLE001
+            logger.warning("GitHub Trending 超时: %s", topic)
+            raise exc
+        except httpx.HTTPStatusError as exc:  # noqa: BLE001
+            logger.error("GitHub Trending 响应异常(%s): %s", topic, exc)
+            raise exc
+
+        return self._parse_html(resp.text, topic)
 
     def _parse_html(self, html: str, topic: str) -> List[RawCandidate]:
         """解析Trending页面HTML"""

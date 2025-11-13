@@ -72,24 +72,25 @@ def check_config():
 def check_dependencies():
     """验证依赖安装"""
     print("3. 检查依赖包...")
+    # (包名, 导入名) 映射
     required = [
-        "arxiv",
-        "httpx",
-        "beautifulsoup4",
-        "openai",
-        "redis",
-        "tenacity",
-        "dotenv",
+        ("arxiv", "arxiv"),
+        ("httpx", "httpx"),
+        ("beautifulsoup4", "bs4"),
+        ("openai", "openai"),
+        ("redis", "redis"),
+        ("tenacity", "tenacity"),
+        ("python-dotenv", "dotenv"),
     ]
 
     missing = []
-    for pkg in required:
+    for pkg_name, import_name in required:
         try:
-            __import__(pkg.replace("-", "_"))
-            print(f"   ✓ {pkg}")
+            __import__(import_name)
+            print(f"   ✓ {pkg_name}")
         except ImportError:
-            print(f"   ✗ {pkg} 未安装")
-            missing.append(pkg)
+            print(f"   ✗ {pkg_name} 未安装")
+            missing.append(pkg_name)
 
     if missing:
         print(f"\n   → 请运行: pip install {' '.join(missing)}")

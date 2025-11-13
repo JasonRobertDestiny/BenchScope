@@ -1,6 +1,7 @@
 """Papers with Code 采集器"""
 from __future__ import annotations
 
+import asyncio
 import logging
 from datetime import datetime
 from typing import List
@@ -24,18 +25,38 @@ class PwCCollector:
         self.min_task_papers = constants.PWC_MIN_TASK_PAPERS
 
     async def collect(self) -> List[RawCandidate]:
-        """按关键词搜索符合条件的任务并抓取论文"""
+        """按关键词并发搜索符合条件的任务并抓取论文"""
 
         candidates: List[RawCandidate] = []
         async with httpx.AsyncClient(timeout=self.timeout) as client:
-            for keyword in self.keywords:
-                tasks = await self._fetch_tasks(client, keyword)
-                for task in tasks:
-                    papers = await self._fetch_task_papers(client, task)
-                    candidates.extend(self._parse_papers(papers, task.get("name")))
+            jobs = [self._fetch_keyword_bundle(client, keyword) for keyword in self.keywords]
+            results = await asyncio.gather(*jobs, return_exceptions=True)
+
+        for keyword, result in zip(self.keywords, results, strict=False):
+            if isinstance(result, Exception):
+                logger.error("PwC关键词任务失败(%s): %s", keyword, result)
+                continue
+            candidates.extend(result)
 
         logger.info("PwC采集完成,候选总数%s", len(candidates))
         return candidates
+
+    async def _fetch_keyword_bundle(
+        self, client: httpx.AsyncClient, keyword: str
+    ) -> List[RawCandidate]:
+        """单个关键词下并发抓取任务和论文"""
+
+        tasks = await self._fetch_tasks(client, keyword)
+        paper_jobs = [self._fetch_task_papers(client, task) for task in tasks]
+        paper_results = await asyncio.gather(*paper_jobs, return_exceptions=True)
+
+        parsed: List[RawCandidate] = []
+        for task_meta, papers in zip(tasks, paper_results, strict=False):
+            if isinstance(papers, Exception):
+                logger.error("PwC任务论文失败(%s): %s", task_meta.get("slug"), papers)
+                continue
+            parsed.extend(self._parse_papers(papers, task_meta.get("name")))
+        return parsed
 
     async def _fetch_tasks(self, client: httpx.AsyncClient, keyword: str) -> List[dict]:
         """查询满足论文数量要求的任务"""

@@ -7,7 +7,7 @@ from typing import Dict, List, Literal, Optional
 
 from src.common import constants
 
-SourceType = Literal["arxiv", "github", "pwc"]
+SourceType = Literal["arxiv", "github", "pwc", "huggingface"]
 
 
 @dataclass(slots=True)

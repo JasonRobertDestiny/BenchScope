@@ -6,7 +6,12 @@ import logging
 from pathlib import Path
 from typing import List
 
-from src.collectors import ArxivCollector, GitHubCollector, PwCCollector
+from src.collectors import (
+    ArxivCollector,
+    GitHubCollector,
+    HuggingFaceCollector,
+    PwCCollector,
+)
 from src.config import Settings, get_settings
 from src.models import RawCandidate, ScoredCandidate
 from src.notifier import FeishuNotifier
@@ -24,7 +29,12 @@ async def run_pipeline() -> None:
     settings = get_settings()
     _configure_logging(settings)
 
-    collectors = [ArxivCollector(), GitHubCollector(), PwCCollector()]
+    collectors = [
+        ArxivCollector(),
+        GitHubCollector(),
+        PwCCollector(),
+        HuggingFaceCollector(settings=settings),
+    ]
     raw_candidates = await _collect_all(collectors)
 
     prefilter = RuleBasedPrefilter()

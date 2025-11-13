@@ -64,22 +64,29 @@
 ### 3. 安装依赖并测试 (5分钟)
 
 ```bash
-# 1. 安装Python依赖
 cd /mnt/d/VibeCoding_pgm/BenchScope
-pip install -r requirements.txt
 
-# 2. 启动Redis (如果未启动)
+# 1. 安装uv (Python包管理器，比pip快10倍)
+curl -LsSf https://astral.sh/uv/install.sh | sh
+# Windows: powershell -c "irm https://astral.sh/uv/install.ps1 | iex"
+
+# 2. 创建虚拟环境并安装依赖
+uv venv
+source .venv/bin/activate  # Windows: .venv\Scripts\activate
+uv pip install -r requirements.txt
+
+# 3. 启动Redis (如果未启动)
 docker run -d -p 6379:6379 redis:7-alpine
 # 或
 redis-server
 
-# 3. 验证配置
+# 4. 验证配置
 python -c "from src.config import get_settings; s = get_settings(); print('✓ 配置加载成功')"
 
-# 4. 运行单元测试
+# 5. 运行单元测试
 python -m pytest tests/unit -v
 
-# 5. 运行完整流程 (测试模式)
+# 6. 运行完整流程 (测试模式)
 python -m src.main
 ```
 

@@ -1,0 +1,11 @@
+huggingface:
+  keywords:
+    - benchmark
+    - evaluation
+    - leaderboard
+  task_categories:
+    - text-generation
+    - question-answering
+    - code
+  min_downloads: 100
+  limit: 50
