@@ -2,6 +2,81 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Development Workflow & Roles
+
+**重要：本项目采用双Agent协作模式**
+
+### 角色分工
+
+| 角色 | 职责 | 交付物 |
+|------|------|--------|
+| **Claude Code** (你) | 产品规划、架构设计、开发指令文档编写、**测试执行**、进度监督、验收 | PRD、系统架构、开发prompt文档、测试报告、验收标准 |
+| **Codex** | 根据Claude Code提供的文档进行具体编码实现 | 源代码、实现文档 |
+
+### 工作流程
+
+```
+用户需求
+    ↓
+Claude Code分析需求 → 编写PRD → 设计架构 → 编写详细开发指令文档
+    ↓
+Codex阅读开发指令 → 编写代码 → 实现功能
+    ↓
+Claude Code执行测试 → 单元测试 + 集成测试 + 手动测试 → 记录测试报告
+    ↓
+Claude Code验收 → 检查是否符合文档规范 → 通过/打回修改
+    ↓
+交付用户
+```
+
+### 开发指令文档位置
+
+Claude Code编写的所有开发指令文档统一放在:
+- `.claude/specs/benchmark-intelligence-agent/` 目录
+- 文档命名规范:
+  - `PHASE{N}-PROMPT.md` - 阶段总体指令
+  - `CODEX-{PHASE}-DETAILED.md` - 详细实现代码+测试用例
+  - `CODEX-URGENT-FIXES.md` - 紧急修复指令
+
+### Codex实施要求
+
+**强制执行**:
+1. Codex必须**严格按照**开发指令文档实现，不得自行修改设计
+2. 如遇到文档不清晰的地方，必须先询问Claude Code，不得自行猜测
+3. **不需要编写测试代码** - 测试由Claude Code负责
+4. 实现完成后，通知Claude Code进行测试验收
+
+### Claude Code测试职责
+
+**测试类型**:
+1. **单元测试**: 编写并执行pytest单元测试
+2. **集成测试**: 验证模块间协作是否正常
+3. **手动测试**: 使用真实数据验证功能 (如`docs/samples/collected_data.json`)
+4. **测试报告**: 记录测试结果到`docs/test-report.md`
+
+**测试流程**:
+```bash
+# 1. 运行单元测试
+pytest tests/unit/test_{module}.py -v
+
+# 2. 手动测试真实数据
+python << 'EOF'
+# 测试代码...
+EOF
+
+# 3. 记录结果到docs/test-report.md
+```
+
+### Claude Code监督要点
+
+**每个Task验收时检查**:
+- [ ] 代码实现是否完全符合开发指令文档
+- [ ] 数据模型、接口签名是否与文档一致
+- [ ] 单元测试是否覆盖文档中的所有测试用例
+- [ ] 手动测试是否按文档要求执行并记录结果
+
+---
+
 ## Project Overview
 
 **BenchScope** = Benchmark Intelligence Agent (BIA)

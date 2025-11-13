@@ -5,14 +5,13 @@ import asyncio
 import json
 import logging
 import sqlite3
-from dataclasses import asdict
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import List, Sequence
 
 from src.common import constants
 from src.config import Settings, get_settings
-from src.models import BenchmarkScore, RawCandidate, ScoredCandidate
+from src.models import ScoredCandidate
 
 logger = logging.getLogger(__name__)
 
@@ -66,11 +65,11 @@ class SQLiteFallback:
                     VALUES (?, ?, ?, ?, ?)
                     """,
                     (
-                        candidate.raw.title,
-                        candidate.raw.source,
-                        candidate.raw.url,
-                        json.dumps(asdict(candidate.score)),
-                        json.dumps(self._serialize_raw(candidate.raw)),
+                        candidate.title,
+                        candidate.source,
+                        candidate.url,
+                        json.dumps(self._serialize_scores(candidate)),
+                        json.dumps(self._serialize_raw(candidate)),
                     ),
                 )
             except Exception as exc:  # noqa: BLE001
@@ -92,12 +91,9 @@ class SQLiteFallback:
         for score_json, raw_json in cursor.fetchall():
             score_dict = json.loads(score_json)
             raw_dict = json.loads(raw_json)
-            results.append(
-                ScoredCandidate(
-                    raw=self._deserialize_raw(raw_dict),
-                    score=BenchmarkScore(**score_dict),
-                )
-            )
+            candidate_data = self._deserialize_raw(raw_dict)
+            candidate = ScoredCandidate(**candidate_data, **score_dict)
+            results.append(candidate)
         conn.close()
         return results
 
@@ -132,31 +128,37 @@ class SQLiteFallback:
         conn.close()
 
     @staticmethod
-    def _serialize_raw(raw: RawCandidate) -> dict:
-        """转换RawCandidate为可JSON化结构"""
-
-        payload = {
-            "title": raw.title,
-            "url": raw.url,
-            "source": raw.source,
-            "abstract": raw.abstract,
-            "authors": raw.authors,
-            "publish_date": raw.publish_date.isoformat() if raw.publish_date else None,
-            "github_stars": raw.github_stars,
-            "github_url": raw.github_url,
-            "dataset_url": raw.dataset_url,
-            "raw_metadata": raw.raw_metadata,
+    def _serialize_raw(candidate: ScoredCandidate) -> dict:
+        return {
+            "title": candidate.title,
+            "url": candidate.url,
+            "source": candidate.source,
+            "abstract": candidate.abstract,
+            "authors": candidate.authors,
+            "publish_date": candidate.publish_date.isoformat() if candidate.publish_date else None,
+            "github_stars": candidate.github_stars,
+            "github_url": candidate.github_url,
+            "dataset_url": candidate.dataset_url,
+            "raw_metadata": candidate.raw_metadata,
         }
-        return payload
 
     @staticmethod
-    def _deserialize_raw(data: dict) -> RawCandidate:
-        """还原RawCandidate对象"""
+    def _serialize_scores(candidate: ScoredCandidate) -> dict:
+        return {
+            "activity_score": candidate.activity_score,
+            "reproducibility_score": candidate.reproducibility_score,
+            "license_score": candidate.license_score,
+            "novelty_score": candidate.novelty_score,
+            "relevance_score": candidate.relevance_score,
+            "reasoning": candidate.reasoning,
+        }
 
+    @staticmethod
+    def _deserialize_raw(data: dict) -> dict:
         publish_date = data.get("publish_date")
         if publish_date:
             try:
                 data["publish_date"] = datetime.fromisoformat(publish_date)
             except ValueError:
                 data["publish_date"] = None
-        return RawCandidate(**data)
+        return data

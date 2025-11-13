@@ -7,5 +7,5 @@ huggingface:
     - text-generation
     - question-answering
     - code
-  min_downloads: 100
+  min_downloads: 10
   limit: 50

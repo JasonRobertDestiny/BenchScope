@@ -1,62 +1,73 @@
-"""评分模块单元测试"""
+"""LLM评分测试"""
 from __future__ import annotations
+
+from datetime import datetime, timezone
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 from src.config import get_settings
 from src.models import RawCandidate
 from src.scorer.llm_scorer import LLMScorer
-from src.scorer.rule_scorer import RuleScorer
 
 
-@pytest.mark.asyncio
-async def test_llm_scorer_basic(monkeypatch):
-    """LLM成功返回后应解析为BenchmarkScore"""
-
-    get_settings.cache_clear()  # type: ignore[attr-defined]
+@pytest.fixture(autouse=True)
+def ensure_openai_env(monkeypatch):
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    get_settings.cache_clear()  # type: ignore[attr-defined]
+    yield
+    get_settings.cache_clear()  # type: ignore[attr-defined]
 
-    scorer = LLMScorer()
 
-    async def fake_call(prompt: str):  # noqa: ARG001
-        return {
-            "innovation": 8,
-            "technical_depth": 7,
-            "impact": 6,
-            "data_quality": 5,
-            "reproducibility": 4,
-        }
-
-    monkeypatch.setattr(scorer, "_call_with_retry", fake_call)
-
-    candidate = RawCandidate(title="TestBench", url="https://example.com", source="arxiv", abstract="demo")
-    score = await scorer.score(candidate)
-
-    assert score.total_score == 30
-    assert score.priority == "medium"
+@pytest.fixture
+def sample_candidate():
+    return RawCandidate(
+        title="AgentBench: Evaluating LLMs as Agents",
+        url="https://arxiv.org/abs/2308.03688",
+        source="arxiv",
+        abstract="We present AgentBench, a benchmark for evaluating LLMs.",
+        authors=["Author A"],
+        publish_date=datetime.now(timezone.utc),
+        github_url="https://github.com/example/agentbench",
+        github_stars=1500,
+    )
 
 
 @pytest.mark.asyncio
-async def test_llm_scorer_without_api_key_fallback(monkeypatch):
-    """未配置API key时直接fallback到规则评分"""
+async def test_llm_scorer_with_mock(sample_candidate):
+    """测试LLM评分（Mock OpenAI API）"""
 
-    get_settings.cache_clear()  # type: ignore[attr-defined]
-    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    mock_response = MagicMock()
+    mock_response.choices = [
+        MagicMock(
+            message=MagicMock(
+                content='{"activity_score": 8.5, "reproducibility_score": 9.0, "license_score": 10.0, "novelty_score": 7.0, "relevance_score": 8.0, "reasoning": "Test"}'
+            )
+        )
+    ]
 
-    scorer = LLMScorer()
-    candidate = RawCandidate(title="Fallback", url="https://example.com", source="github", github_stars=200)
+    with patch("src.scorer.llm_scorer.AsyncOpenAI") as mock_openai:
+        mock_client = AsyncMock()
+        mock_client.chat.completions.create = AsyncMock(return_value=mock_response)
+        mock_openai.return_value = mock_client
 
-    score = await scorer.score(candidate)
-    fallback = scorer.rule_scorer.score(candidate)
+        async with LLMScorer() as scorer:
+            scorer.redis_client = None  # 禁用Redis
+            result = await scorer.score(sample_candidate)
 
-    assert score.total_score == fallback.total_score
+            assert result.title == sample_candidate.title
+            assert 0 <= result.activity_score <= 10
+            assert 0 <= result.reproducibility_score <= 10
+            assert result.reasoning == "Test"
 
 
-def test_rule_scorer_thresholds():
-    """规则评分应随star上升而增加"""
+@pytest.mark.asyncio
+async def test_fallback_score(sample_candidate):
+    """测试规则兜底评分"""
 
-    scorer = RuleScorer()
-    low = scorer.score(RawCandidate(title="Low", url="https://a", source="github", github_stars=10))
-    high = scorer.score(RawCandidate(title="High", url="https://b", source="github", github_stars=1500))
+    async with LLMScorer() as scorer:
+        fallback = scorer._fallback_score(sample_candidate)
 
-    assert high.total_score > low.total_score
+        assert fallback["activity_score"] == 9.0
+        assert fallback["reproducibility_score"] == 6.0
+        assert "reasoning" in fallback

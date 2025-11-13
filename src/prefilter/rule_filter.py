@@ -1,9 +1,8 @@
-"""规则预筛选模块"""
+"""规则预筛选引擎"""
 from __future__ import annotations
 
 import logging
-from difflib import SequenceMatcher
-from typing import List, Set
+from typing import List
 
 from src.common import constants
 from src.models import RawCandidate
@@ -11,68 +10,48 @@ from src.models import RawCandidate
 logger = logging.getLogger(__name__)
 
 
-class RuleBasedPrefilter:
-    """通过轻量规则过滤噪音数据"""
+def prefilter(candidate: RawCandidate) -> bool:
+    """Phase 2 基线预筛选规则"""
 
-    def __init__(self, similarity_threshold: float = constants.PREFILTER_SIMILARITY_THRESHOLD) -> None:
-        self.similarity_threshold = similarity_threshold
-        self.min_github_stars = constants.PREFILTER_MIN_GITHUB_STARS
-
-    def filter(self, candidates: List[RawCandidate]) -> List[RawCandidate]:
-        """执行预筛选并记录过滤原因"""
-
-        filtered: List[RawCandidate] = []
-        seen_urls: Set[str] = set()
-        accepted_titles: List[str] = []
-
-        for candidate in candidates:
-            url_key = candidate.url.strip().lower()
-            if url_key in seen_urls:
-                logger.debug("规则过滤: URL重复 %s", candidate.title)
-                continue
-
-            if self._is_duplicate_title(candidate.title, accepted_titles):
-                logger.debug("规则过滤: 标题相似 %s", candidate.title)
-                continue
-
-            reason = self._should_reject(candidate)
-            if reason:
-                logger.debug("规则过滤: %s -> %s", reason, candidate.title)
-                continue
-
-            filtered.append(candidate)
-            seen_urls.add(url_key)
-            accepted_titles.append(candidate.title)
-
-        logger.info(
-            "预筛选完成,输入%s条,输出%s条,过滤率%.0f%%",
-            len(candidates),
-            len(filtered),
-            0 if not candidates else (1 - len(filtered) / len(candidates)) * 100,
-        )
-        return filtered
-
-    def _is_duplicate_title(self, title: str, accepted_titles: List[str]) -> bool:
-        """利用相似度避免重复记录"""
-
-        for existing in accepted_titles:
-            ratio = SequenceMatcher(None, title.lower(), existing.lower()).ratio()
-            if ratio >= self.similarity_threshold:
-                return True
+    if not candidate.title or len(candidate.title.strip()) < 10:
+        logger.debug("过滤: 标题过短 - %s", candidate.title)
         return False
 
-    def _should_reject(self, candidate: RawCandidate) -> str | None:
-        """根据业务规则判断是否丢弃"""
+    if not candidate.abstract or len(candidate.abstract.strip()) < 20:
+        logger.debug("过滤: 摘要过短 - %s", candidate.title)
+        return False
 
-        if candidate.source == "github":
-            stars = candidate.github_stars or 0
-            if stars < self.min_github_stars:
-                return "GitHub star过低"
+    if not candidate.url or not candidate.url.startswith(("http://", "https://")):
+        logger.debug("过滤: URL无效 - %s", candidate.url)
+        return False
 
-        if candidate.source == "arxiv" and not candidate.abstract:
-            return "arXiv无摘要"
+    valid_sources = ["arxiv", "github", "pwc", "huggingface"]
+    if candidate.source not in valid_sources:
+        logger.debug("过滤: 来源不在白名单 - %s", candidate.source)
+        return False
 
-        if "survey" in candidate.title.lower() and not candidate.github_url:
-            return "Survey无代码"
+    text = f"{candidate.title} {candidate.abstract}".lower()
+    matched = [kw for kw in constants.BENCHMARK_KEYWORDS if kw in text]
+    if not matched:
+        logger.debug("过滤: 无关键词命中 - %s", candidate.title)
+        return False
 
-        return None
+    logger.debug("通过: %s", candidate.title[:50])
+    return True
+
+
+def prefilter_batch(candidates: List[RawCandidate]) -> List[RawCandidate]:
+    """批量预筛选"""
+
+    if not candidates:
+        return []
+
+    filtered = [c for c in candidates if prefilter(c)]
+    rate = 100 * (1 - len(filtered) / len(candidates))
+    logger.info(
+        "预筛选完成,输入%d条,输出%d条,过滤率%.1f%%",
+        len(candidates),
+        len(filtered),
+        rate,
+    )
+    return filtered

@@ -4,7 +4,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from datetime import datetime, timedelta
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 import httpx
 
@@ -22,50 +22,61 @@ class FeishuAPIError(Exception):
 class FeishuStorage:
     """负责与飞书多维表格交互"""
 
+    FIELD_MAPPING: Dict[str, str] = {
+        "title": "标题",
+        "source": "来源",
+        "url": "URL",
+        "abstract": "摘要",
+        "activity_score": "活跃度",
+        "reproducibility_score": "可复现性",
+        "license_score": "许可合规",
+        "novelty_score": "任务新颖性",
+        "relevance_score": "MGX适配度",
+        "total_score": "总分",
+        "priority": "优先级",
+        "reasoning": "评分依据",
+        "status": "状态",
+    }
+
     def __init__(self, settings: Optional[Settings] = None) -> None:
         self.settings = settings or get_settings()
         self.base_url = "https://open.feishu.cn/open-apis"
         self.batch_size = constants.FEISHU_BATCH_SIZE
-        self.rate_interval = constants.FEISHU_RATE_LIMIT_SECONDS
+        self.rate_interval = constants.FEISHU_RATE_LIMIT_DELAY
         self.access_token: Optional[str] = None
         self.token_expire_at: Optional[datetime] = None
 
-    async def save(self, candidates: List[ScoredCandidate]) -> bool:
-        """批量写入飞书,失败时抛异常"""
+    async def save(self, candidates: List[ScoredCandidate]) -> None:
+        """批量写入飞书多维表格"""
 
         if not candidates:
-            return True
+            return
 
         await self._ensure_access_token()
-        records = [self._build_record(candidate) for candidate in candidates]
+
+        async with httpx.AsyncClient(timeout=10) as client:
+            for start in range(0, len(candidates), self.batch_size):
+                chunk = candidates[start : start + self.batch_size]
+                records = [self._to_feishu_record(c) for c in chunk]
+                await self._batch_create_records(client, records)
+
+                if start + self.batch_size < len(candidates):
+                    await asyncio.sleep(self.rate_interval)
+
+    async def _batch_create_records(self, client: httpx.AsyncClient, records: List[dict]) -> None:
         url = (
             f"{self.base_url}/bitable/v1/apps/{self.settings.feishu.bitable_app_token}/"
             f"tables/{self.settings.feishu.bitable_table_id}/records/batch_create"
         )
-
-        async with httpx.AsyncClient(timeout=10) as client:
-            for start in range(0, len(records), self.batch_size):
-                chunk = records[start : start + self.batch_size]
-                payload = {"records": chunk}
-                try:
-                    resp = await client.post(url, headers=self._auth_header(), json=payload)
-                    resp.raise_for_status()
-                    logger.info(
-                        "飞书批次写入成功(batch=%s,size=%s)",
-                        start // self.batch_size + 1,
-                        len(chunk),
-                    )
-                except httpx.HTTPStatusError as exc:  # noqa: BLE001
-                    logger.error("飞书写入失败: %s - %s", exc.response.status_code, exc.response.text)
-                    raise FeishuAPIError("批量写入失败") from exc
-
-                await asyncio.sleep(self.rate_interval)
-
-        return True
+        try:
+            resp = await client.post(url, headers=self._auth_header(), json={"records": records})
+            resp.raise_for_status()
+            logger.info("飞书批次写入成功: %s条", len(records))
+        except httpx.HTTPStatusError as exc:  # noqa: BLE001
+            logger.error("飞书写入失败: %s - %s", exc.response.status_code, exc.response.text)
+            raise FeishuAPIError("批量写入失败") from exc
 
     async def _ensure_access_token(self) -> None:
-        """确保token存在且未过期"""
-
         now = datetime.now()
         if self.access_token and self.token_expire_at and now < self.token_expire_at:
             return
@@ -75,6 +86,7 @@ class FeishuStorage:
             "app_id": self.settings.feishu.app_id,
             "app_secret": self.settings.feishu.app_secret,
         }
+
         async with httpx.AsyncClient(timeout=5) as client:
             resp = await client.post(url, json=payload)
             resp.raise_for_status()
@@ -85,32 +97,77 @@ class FeishuStorage:
             logger.info("飞书access_token刷新成功")
 
     def _auth_header(self) -> dict[str, str]:
-        """构造认证头"""
-
         if not self.access_token:
             raise FeishuAPIError("access_token不存在")
         return {"Authorization": f"Bearer {self.access_token}"}
 
-    def _build_record(self, candidate: ScoredCandidate) -> dict[str, dict]:
-        """将候选转换为飞书字段映射"""
-
-        return {
-            "fields": {
-                "标题": candidate.raw.title,
-                "来源": candidate.raw.source,
-                "URL": candidate.raw.url,
-                "摘要": candidate.raw.abstract or "",
-                "创新性": candidate.score.innovation,
-                "技术深度": candidate.score.technical_depth,
-                "影响力": candidate.score.impact,
-                "数据质量": candidate.score.data_quality,
-                "可复现性": candidate.score.reproducibility,
-                "总分": candidate.score.total_score,
-                "优先级": candidate.score.priority,
-                "状态": "待审阅",
-                "发现时间": datetime.now().isoformat(),
-                "GitHub Stars": candidate.raw.github_stars or 0,
-                "GitHub URL": candidate.raw.github_url or "",
-                "数据集URL": candidate.raw.dataset_url or "",
-            }
+    def _to_feishu_record(self, candidate: ScoredCandidate) -> dict:
+        fields = {
+            self.FIELD_MAPPING["title"]: candidate.title,
+            self.FIELD_MAPPING["source"]: candidate.source,
+            self.FIELD_MAPPING["url"]: {"link": candidate.url},  # 飞书URL字段要求对象格式
+            self.FIELD_MAPPING["abstract"]: candidate.abstract or "",
+            self.FIELD_MAPPING["activity_score"]: candidate.activity_score,
+            self.FIELD_MAPPING["reproducibility_score"]: candidate.reproducibility_score,
+            self.FIELD_MAPPING["license_score"]: candidate.license_score,
+            self.FIELD_MAPPING["novelty_score"]: candidate.novelty_score,
+            self.FIELD_MAPPING["relevance_score"]: candidate.relevance_score,
+            self.FIELD_MAPPING["total_score"]: round(candidate.total_score, 2),
+            self.FIELD_MAPPING["priority"]: candidate.priority,
+            self.FIELD_MAPPING["reasoning"]: candidate.reasoning[:500],
+            self.FIELD_MAPPING["status"]: "pending",
         }
+        return {"fields": fields}
+
+    async def get_existing_urls(self) -> set[str]:
+        """查询飞书Bitable已存在的所有URL（用于去重）"""
+        await self._ensure_access_token()
+
+        existing_urls: set[str] = set()
+        page_token = None
+
+        async with httpx.AsyncClient(timeout=10) as client:
+            while True:
+                url = f"{self.base_url}/bitable/v1/apps/{self.settings.feishu.bitable_app_token}/tables/{self.settings.feishu.bitable_table_id}/records/search"
+
+                # 分页查询所有记录
+                payload = {"page_size": 500}
+                if page_token:
+                    payload["page_token"] = page_token
+
+                resp = await client.post(url, headers=self._auth_header(), json=payload)
+                resp.raise_for_status()
+                data = resp.json()
+
+                if data.get("code") != 0:
+                    raise FeishuAPIError(f"飞书查询失败: {data}")
+
+                # 提取URL字段
+                items = data.get("data", {}).get("items", [])
+                url_field_name = self.FIELD_MAPPING["url"]
+
+                for item in items:
+                    fields = item.get("fields", {})
+                    url_obj = fields.get(url_field_name)
+
+                    # 飞书URL字段是对象格式: {"link": "url", "text": "display text"}
+                    if isinstance(url_obj, dict):
+                        url_value = url_obj.get("link")
+                        if url_value:
+                            existing_urls.add(url_value)
+                    # 兼容旧数据可能是字符串格式
+                    elif isinstance(url_obj, str):
+                        existing_urls.add(url_obj)
+
+                # 检查是否还有下一页
+                has_more = data.get("data", {}).get("has_more", False)
+                if not has_more:
+                    break
+
+                page_token = data.get("data", {}).get("page_token")
+                if not page_token:
+                    break
+
+        logger.info("飞书已存在URL数量: %d", len(existing_urls))
+        return existing_urls
+

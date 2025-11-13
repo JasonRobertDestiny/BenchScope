@@ -76,14 +76,19 @@ class HuggingFaceCollector:
         return getattr(dataset, "__dict__", {})
 
     def _is_benchmark_dataset(self, data: dict[str, Any]) -> bool:
-        """通过下载量与文本关键词判断是否为Benchmark"""
+        """通过下载量与关键词(标题/标签/摘要)判断是否为Benchmark"""
 
         downloads = int(data.get("downloads") or 0)
         if downloads < self.cfg.min_downloads:
             return False
 
         summary = self._extract_summary(data).lower()
-        return any(keyword in summary for keyword in ("benchmark", "evaluation", "leaderboard"))
+        dataset_id = (data.get("id") or data.get("_id") or "").lower()
+        tags = " ".join((data.get("tags") or []))
+        keywords = [kw.lower() for kw in self.cfg.keywords]
+
+        haystacks = [summary, tags.lower(), dataset_id]
+        return any(kw in field for kw in keywords for field in haystacks if field)
 
     def _to_candidate(self, data: dict[str, Any]) -> RawCandidate | None:
         """将数据集信息转换为内部模型"""
@@ -133,4 +138,3 @@ class HuggingFaceCollector:
             return datetime.fromisoformat(value.replace("Z", "+00:00"))
         except ValueError:
             return None
-

@@ -13,7 +13,8 @@ import yaml
 
 from src.common import constants
 
-load_dotenv()
+# 明确加载.env.local文件（覆盖.env）
+load_dotenv(dotenv_path=Path(__file__).parent.parent / ".env.local", override=True)
 
 
 @dataclass(slots=True)
@@ -35,6 +36,7 @@ class FeishuSettings:
     bitable_app_token: str
     bitable_table_id: str
     webhook_url: Optional[str] = None
+    webhook_secret: Optional[str] = None  # Webhook签名密钥（可选）
 
 
 @dataclass(slots=True)
@@ -80,7 +82,7 @@ def _get_env(key: str, default: Optional[str] = None) -> str:
     return value
 
 
-@lru_cache(maxsize=1)
+# @lru_cache(maxsize=1)  # 临时禁用缓存，避免环境变量更新后读取旧值
 def get_settings() -> Settings:
     """构建全局配置实例,使用缓存避免重复解析"""
 
@@ -103,6 +105,7 @@ def get_settings() -> Settings:
             bitable_app_token=_get_env("FEISHU_BITABLE_APP_TOKEN", ""),
             bitable_table_id=_get_env("FEISHU_BITABLE_TABLE_ID", ""),
             webhook_url=os.getenv("FEISHU_WEBHOOK_URL"),
+            webhook_secret=os.getenv("FEISHU_WEBHOOK_SECRET"),  # 可选：Webhook签名密钥
         ),
         logging=LoggingSettings(
             level=os.getenv("LOG_LEVEL", "INFO"),

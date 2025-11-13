@@ -1,161 +1,240 @@
-"""LLM评分模块"""
+"""LLM评分引擎"""
 from __future__ import annotations
 
 import asyncio
 import hashlib
 import json
 import logging
-from dataclasses import asdict
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 import redis.asyncio as redis
 from openai import AsyncOpenAI
-from tenacity import AsyncRetrying, RetryError, stop_after_attempt, wait_exponential
+from tenacity import retry, stop_after_attempt, wait_exponential
 
 from src.common import constants
-from src.config import Settings, get_settings
-from src.models import BenchmarkScore, RawCandidate
-from src.scorer.rule_scorer import RuleScorer
+from src.config import get_settings
+from src.models import RawCandidate, ScoredCandidate
 
 logger = logging.getLogger(__name__)
 
 
 class LLMScorer:
-    """调用LLM获取5维度评分,失败时回落到规则评分"""
+    """使用LLM完成Phase 2评分的引擎"""
 
-    def __init__(self, settings: Optional[Settings] = None) -> None:
-        self.settings = settings or get_settings()
-        self.rule_scorer = RuleScorer()
-        self.model = self.settings.openai.model
-        self.timeout = constants.LLM_TIMEOUT_SECONDS
-        self.cache_ttl = constants.LLM_CACHE_TTL_SECONDS
+    def __init__(self) -> None:
+        self.settings = get_settings()
+        api_key = self.settings.openai.api_key
+        base_url = self.settings.openai.base_url
         self.client: Optional[AsyncOpenAI] = None
-        if self.settings.openai.api_key:
-            client_kwargs = {"api_key": self.settings.openai.api_key}
-            if self.settings.openai.base_url:
-                client_kwargs["base_url"] = self.settings.openai.base_url
-            self.client = AsyncOpenAI(**client_kwargs)
-        self.cache = redis.from_url(
-            self.settings.redis.url,
-            encoding="utf-8",
-            decode_responses=True,
-        )
+        if api_key:
+            self.client = AsyncOpenAI(api_key=api_key, base_url=base_url)
+        self.redis_client: Optional[redis.Redis] = None
 
-    async def score(self, candidate: RawCandidate) -> BenchmarkScore:
-        """评分入口"""
-
-        cache_key = self._cache_key(candidate)
-        cached = await self._read_cache(cache_key)
-        if cached:
-            return BenchmarkScore(**cached)
-
-        if not self.client:
-            logger.warning("未配置OpenAI,使用规则评分")
-            return self.rule_scorer.score(candidate)
-
-        prompt = self._build_prompt(candidate)
-
+    async def __aenter__(self) -> "LLMScorer":
         try:
-            score_dict = await self._call_with_retry(prompt)
-            score = BenchmarkScore(**score_dict)
+            self.redis_client = redis.from_url(
+                self.settings.redis.url,
+                encoding="utf-8",
+                decode_responses=True,
+            )
+            await self.redis_client.ping()
         except Exception as exc:  # noqa: BLE001
-            logger.error("LLM评分失败, fallback规则评分: %s", exc)
-            score = self.rule_scorer.score(candidate)
-            score_dict = asdict(score)
+            logger.warning("Redis连接失败,将不使用缓存: %s", exc)
+            self.redis_client = None
+        return self
 
-        await self._write_cache(cache_key, score_dict)
-        return score
-
-    async def _call_with_retry(self, prompt: str) -> Dict[str, int]:
-        """带重试地调用LLM"""
-
-        if not self.client:
-            raise RuntimeError("LLM客户端未初始化")
-
-        async for attempt in AsyncRetrying(
-            stop=stop_after_attempt(3),
-            wait=wait_exponential(multiplier=1, min=1, max=8),
-            reraise=True,
-        ):
-            with attempt:
-                response = await asyncio.wait_for(
-                    self.client.chat.completions.create(
-                        model=self.model,
-                        messages=[
-                            {
-                                "role": "system",
-                                "content": "你是AI Benchmark评估专家,负责对候选进行量化评分。",
-                            },
-                            {"role": "user", "content": prompt},
-                        ],
-                        temperature=0.3,
-                        max_tokens=200,
-                    ),
-                    timeout=self.timeout,
-                )
-                content = response.choices[0].message.content
-                if not content:
-                    raise ValueError("LLM未返回内容")
-                return self._parse_scores(content)
-
-        raise RetryError("LLM多次调用失败")
-
-    def _build_prompt(self, candidate: RawCandidate) -> str:
-        """构建评分提示词"""
-
-        return (
-            "请为以下Benchmark候选在创新性/技术深度/影响力/数据质量/可复现性5个维度打分(0-10分)。\n"
-            f"标题: {candidate.title}\n"
-            f"来源: {candidate.source}\n"
-            f"摘要: {candidate.abstract or 'N/A'}\n"
-            f"GitHub Stars: {candidate.github_stars or 'N/A'}\n"
-            f"发布时间: {candidate.publish_date or 'N/A'}\n"
-            "输出JSON,示例:{\"innovation\":8,...}"
-        )
-
-    def _parse_scores(self, content: str) -> Dict[str, int]:
-        """解析LLM返回的JSON字符串"""
-
-        try:
-            data: Dict[str, Any] = json.loads(content)
-        except json.JSONDecodeError as exc:
-            logger.error("LLM返回非JSON: %s", content)
-            raise ValueError("LLM输出非法") from exc
-
-        required = [
-            "innovation",
-            "technical_depth",
-            "impact",
-            "data_quality",
-            "reproducibility",
-        ]
-        missing = [key for key in required if key not in data]
-        if missing:
-            raise ValueError(f"LLM缺少字段: {missing}")
-
-        return {key: int(data[key]) for key in required}
+    async def __aexit__(self, exc_type, exc, tb) -> None:
+        if self.redis_client:
+            await self.redis_client.aclose()
+            self.redis_client = None
 
     def _cache_key(self, candidate: RawCandidate) -> str:
-        """基于标题生成稳定缓存键"""
+        key_str = f"{candidate.title}:{candidate.url}"
+        digest = hashlib.md5(key_str.encode(), usedforsecurity=False).hexdigest()  # noqa: S324
+        return f"{constants.REDIS_KEY_PREFIX}score:{digest}"
 
-        digest = hashlib.md5(candidate.title.encode("utf-8"), usedforsecurity=False).hexdigest()  # noqa: S324
-        return f"score:{digest}"
-
-    async def _read_cache(self, key: str) -> Optional[Dict[str, int]]:
-        """读取Redis缓存,异常时静默忽略"""
-
+    async def _get_cached_score(self, candidate: RawCandidate) -> Optional[Dict[str, Any]]:
+        if not self.redis_client:
+            return None
         try:
-            value = await self.cache.get(key)
-            if value:
-                return json.loads(value)
+            cached = await self.redis_client.get(self._cache_key(candidate))
+            if cached:
+                logger.debug("评分缓存命中: %s", candidate.title[:50])
+                return json.loads(cached)
         except Exception as exc:  # noqa: BLE001
-            logger.debug("读取缓存失败: %s", exc)
+            logger.warning("读取Redis失败: %s", exc)
         return None
 
-    async def _write_cache(self, key: str, payload: Dict[str, int]) -> None:
-        """写入缓存,容错即可"""
-
+    async def _set_cached_score(self, candidate: RawCandidate, payload: Dict[str, Any]) -> None:
+        if not self.redis_client:
+            return
         try:
-            await self.cache.setex(key, self.cache_ttl, json.dumps(payload))
+            await self.redis_client.setex(
+                self._cache_key(candidate),
+                constants.REDIS_TTL_DAYS * 86400,
+                json.dumps(payload),
+            )
         except Exception as exc:  # noqa: BLE001
-            logger.debug("写入缓存失败: %s", exc)
+            logger.warning("写入Redis失败: %s", exc)
+
+    @retry(
+        stop=stop_after_attempt(constants.LLM_MAX_RETRIES),
+        wait=wait_exponential(multiplier=1, min=2, max=10),
+    )
+    async def _call_llm(self, candidate: RawCandidate) -> Dict[str, Any]:
+        if not self.client:
+            raise RuntimeError("未配置OpenAI接口,无法调用LLM")
+
+        response = await asyncio.wait_for(
+            self.client.chat.completions.create(
+                model=self.settings.openai.model or constants.LLM_MODEL,
+                messages=[
+                    {
+                        "role": "system",
+                        "content": "你是一名AI Benchmark评审专家,负责严格量化候选项目。",
+                    },
+                    {"role": "user", "content": self._build_prompt(candidate)},
+                ],
+                temperature=0.2,
+                max_tokens=400,
+            ),
+            timeout=constants.LLM_TIMEOUT_SECONDS,
+        )
+
+        content = response.choices[0].message.content
+        if not content:
+            raise ValueError("LLM未返回内容")
+
+        # 调试日志：输出LLM原始响应
+        logger.debug(f"LLM原始响应 (前500字符): {content[:500]}")
+
+        # 提取JSON：处理markdown代码块包裹的情况
+        json_str = content.strip()
+        if json_str.startswith("```"):
+            # 去除markdown代码块标记
+            lines = json_str.split("\n")
+            if lines[0].startswith("```"):
+                lines = lines[1:]  # 去除开头的```json或```
+            if lines and lines[-1].strip() == "```":
+                lines = lines[:-1]  # 去除结尾的```
+            json_str = "\n".join(lines).strip()
+
+        scores = json.loads(json_str)
+        required = [
+            "activity_score",
+            "reproducibility_score",
+            "license_score",
+            "novelty_score",
+            "relevance_score",
+            "reasoning",
+        ]
+        for field in required:
+            if field not in scores:
+                raise ValueError(f"LLM响应缺少字段: {field}")
+            if field != "reasoning":
+                scores[field] = max(0.0, min(10.0, float(scores[field])))
+        return scores
+
+    def _build_prompt(self, candidate: RawCandidate) -> str:
+        github_info = ""
+        if candidate.github_url:
+            github_info = f"\nGitHub链接: {candidate.github_url}"
+            if candidate.github_stars is not None:
+                github_info += f" (stars: {candidate.github_stars})"
+
+        return f"""请对以下AI Benchmark候选进行评分(0-10分,可保留一位小数)。
+
+候选信息:
+- 标题: {candidate.title}
+- 来源: {candidate.source}
+- URL: {candidate.url}
+- 摘要: {(candidate.abstract or 'N/A')[:500]}
+{github_info}
+
+评分维度:
+1. 活跃度(activity_score): GitHub stars 与最近更新情况
+2. 可复现性(reproducibility_score): 代码/数据/文档公开程度
+3. 许可合规(license_score): MIT/Apache/BSD得分更高,未知/专有扣分
+4. 任务新颖性(novelty_score): 是否提供全新 Benchmark 或方法
+5. MGX适配度(relevance_score): 是否贴合多智能体/代码/工具使用场景
+
+请输出JSON,示例:
+{{
+  "activity_score": 8.5,
+  "reproducibility_score": 9.0,
+  "license_score": 10.0,
+  "novelty_score": 7.0,
+  "relevance_score": 8.0,
+  "reasoning": "【活跃度】GitHub stars较高/近期有更新；【可复现性】代码/数据开源情况；【许可合规】MIT/Apache/BSD等；【新颖性】相比已有任务的独特性；【MGX适配度】与多agent/代码生成的相关性"
+}}
+"""
+
+    async def score(self, candidate: RawCandidate) -> ScoredCandidate:
+        cached = await self._get_cached_score(candidate)
+        if cached:
+            scores = cached
+        else:
+            if not self.client:
+                logger.warning("OpenAI未配置,使用规则兜底评分")
+                scores = self._fallback_score(candidate)
+            else:
+                try:
+                    scores = await self._call_llm(candidate)
+                except Exception as exc:  # noqa: BLE001
+                    logger.error("LLM评分失败,使用兜底: %s", exc)
+                    scores = self._fallback_score(candidate)
+                else:
+                    await self._set_cached_score(candidate, scores)
+
+        return ScoredCandidate(
+            title=candidate.title,
+            url=candidate.url,
+            source=candidate.source,
+            abstract=candidate.abstract,
+            authors=candidate.authors,
+            publish_date=candidate.publish_date,
+            github_stars=candidate.github_stars,
+            github_url=candidate.github_url,
+            dataset_url=candidate.dataset_url,
+            raw_metadata=candidate.raw_metadata,
+            activity_score=scores["activity_score"],
+            reproducibility_score=scores["reproducibility_score"],
+            license_score=scores["license_score"],
+            novelty_score=scores["novelty_score"],
+            relevance_score=scores["relevance_score"],
+            reasoning=scores.get("reasoning", ""),
+        )
+
+    def _fallback_score(self, candidate: RawCandidate) -> Dict[str, Any]:
+        activity = 5.0
+        if candidate.github_stars:
+            if candidate.github_stars >= 1000:
+                activity = 9.0
+            elif candidate.github_stars >= 500:
+                activity = 7.5
+            elif candidate.github_stars >= 100:
+                activity = 6.0
+
+        reproducibility = 3.0
+        if candidate.github_url:
+            reproducibility += 3.0
+        if candidate.dataset_url:
+            reproducibility += 3.0
+
+        return {
+            "activity_score": activity,
+            "reproducibility_score": min(10.0, reproducibility),
+            "license_score": 5.0,
+            "novelty_score": 5.0,
+            "relevance_score": 5.0,
+            "reasoning": "规则兜底评分(LLM不可用)",
+        }
+
+    async def score_batch(self, candidates: List[RawCandidate]) -> List[ScoredCandidate]:
+        if not candidates:
+            return []
+
+        tasks = [self.score(candidate) for candidate in candidates]
+        results = await asyncio.gather(*tasks)
+        logger.info("批量评分完成: %d条", len(results))
+        return list(results)
