@@ -90,16 +90,21 @@ class FeishuNotifier:
         return constants.FEISHU_SOURCE_NAME_MAP.get(normalized, fallback.title())
 
     async def _send_medium_priority_summary(self, candidates: List[ScoredCandidate]) -> None:
-        """发送中优先级候选摘要卡片 - 专业简洁版"""
+        """发送中优先级候选摘要卡片 - 专业排版版"""
         top_limit = constants.FEISHU_MEDIUM_TOPK
         top_candidates = sorted(candidates, key=lambda x: x.total_score, reverse=True)[:top_limit]
         avg_medium_score = sum(c.total_score for c in candidates) / len(candidates)
 
-        # 构建内容
+        # 计算分数范围
+        scores = [c.total_score for c in candidates]
+        min_score = min(scores)
+        max_score = max(scores)
+
+        # 构建内容 - 专业排版
         content = (
-            f"**中优先级候选概览** (共 {len(candidates)} 条)\n\n"
-            f"平均分: **{avg_medium_score:.1f}** / 10  |  评分区间: 6.0 - 7.9\n\n"
-            f"**Top {top_limit} 推荐**\n\n"
+            f"**候选概览**\n"
+            f"  总数: {len(candidates)} 条  │  平均分: {avg_medium_score:.1f} / 10  │  分数区间: {min_score:.1f} ~ {max_score:.1f}\n\n"
+            f"**Top {min(top_limit, len(top_candidates))} 推荐**\n\n"
         )
 
         for i, c in enumerate(top_candidates, 1):
@@ -107,14 +112,14 @@ class FeishuNotifier:
             source_name = self._format_source_name(c.source)
 
             content += (
-                f"{i}. **{title}**\n"
-                f"   {source_name}  |  评分 {c.total_score:.1f}  |  "
-                f"活跃度 {c.activity_score:.1f}  |  可复现性 {c.reproducibility_score:.1f}\n"
+                f"**{i}. {title}**\n"
+                f"   来源: {source_name}  │  评分: {c.total_score:.1f}  │  "
+                f"活跃度: {c.activity_score:.1f}  │  可复现性: {c.reproducibility_score:.1f}\n"
                 f"   [查看详情]({c.url})\n\n"
             )
 
         if len(candidates) > top_limit:
-            content += f"\n其余 {len(candidates)-top_limit} 条候选请在飞书表格查看"
+            content += f"\n其余 {len(candidates)-top_limit} 条候选可在飞书表格查看\n"
 
         card = {
             "msg_type": "interactive",
@@ -149,7 +154,7 @@ class FeishuNotifier:
         high_priority: List[ScoredCandidate],
         medium_priority: List[ScoredCandidate],
     ) -> dict:
-        """构建统计摘要卡片 (支持markdown渲染)"""
+        """构建统计摘要卡片 - 专业排版版"""
         avg_score = sum(c.total_score for c in qualified) / len(qualified)
 
         # 统计数据源分布
@@ -158,17 +163,17 @@ class FeishuNotifier:
             source_counts[c.source] = source_counts.get(c.source, 0) + 1
 
         # 格式化数据源分布
-        source_breakdown = ", ".join(
-            f"{self._format_source_name(src)}: {cnt}" for src, cnt in sorted(source_counts.items())
-        )
+        source_lines = []
+        for src, cnt in sorted(source_counts.items(), key=lambda x: x[1], reverse=True):
+            source_name = self._format_source_name(src)
+            source_lines.append(f"  {source_name}: {cnt} 条")
+        source_breakdown = "\n".join(source_lines)
 
         # 统计分数分布
-        score_ranges = {
-            "9.0+": len([c for c in qualified if c.total_score >= 9.0]),
-            "8.0-8.9": len([c for c in qualified if 8.0 <= c.total_score < 9.0]),
-            "7.0-7.9": len([c for c in qualified if 7.0 <= c.total_score < 8.0]),
-            "6.0-6.9": len([c for c in qualified if 6.0 <= c.total_score < 7.0]),
-        }
+        excellent = len([c for c in qualified if c.total_score >= 9.0])
+        good = len([c for c in qualified if 8.0 <= c.total_score < 9.0])
+        medium = len([c for c in qualified if 7.0 <= c.total_score < 8.0])
+        pass_level = len([c for c in qualified if 6.0 <= c.total_score < 7.0])
 
         # 质量评级
         if avg_score >= constants.QUALITY_EXCELLENT_THRESHOLD:
@@ -181,16 +186,20 @@ class FeishuNotifier:
             quality_indicator = "一般"
 
         content = (
-            f"**本次采集完成** - {datetime.now().strftime('%Y-%m-%d %H:%M')}\n\n"
-            "**候选统计**\n"
-            f"- 高优先级 (≥8.0): **{len(high_priority)}** 条 (已发卡片)\n"
-            f"- 中优先级 (6.0-7.9): **{len(medium_priority)}** 条 (已发摘要)\n"
-            f"- 总计: **{len(qualified)}** 条合格候选\n\n"
-            "**质量指标**\n"
-            f"- 平均分: **{avg_score:.2f}/10** {quality_indicator}\n"
-            f"- 分数分布: {score_ranges['9.0+']}个卓越 | {score_ranges['8.0-8.9']}个优秀 | {score_ranges['7.0-7.9']}个良好 | {score_ranges['6.0-6.9']}个合格\n\n"
-            "**来源分布**\n"
-            f"- {source_breakdown}\n\n"
+            f"**采集时间**  {datetime.now().strftime('%Y-%m-%d %H:%M')}\n\n"
+            f"**候选统计**\n"
+            f"  高优先级 (≥8.0): {len(high_priority)} 条 (已发详细卡片)\n"
+            f"  中优先级 (6.0~7.9): {len(medium_priority)} 条 (已发摘要)\n"
+            f"  合格候选总计: {len(qualified)} 条\n\n"
+            f"**质量分析**\n"
+            f"  平均分: {avg_score:.2f} / 10  ({quality_indicator})\n"
+            f"  分数分布:\n"
+            f"    卓越 (9.0+): {excellent} 条\n"
+            f"    优秀 (8.0~8.9): {good} 条\n"
+            f"    良好 (7.0~7.9): {medium} 条\n"
+            f"    合格 (6.0~6.9): {pass_level} 条\n\n"
+            f"**来源分布**\n"
+            f"{source_breakdown}\n\n"
             f"详细候选请查看上方消息或[飞书表格]({constants.FEISHU_BENCH_TABLE_URL})"
         )
 
@@ -198,7 +207,7 @@ class FeishuNotifier:
             "msg_type": "interactive",
             "card": {
                 "header": {
-                    "title": {"tag": "plain_text", "content": "🎯 BenchScope 采集报告"},
+                    "title": {"tag": "plain_text", "content": "BenchScope 采集报告"},
                     "template": "blue",
                 },
                 "elements": [
@@ -211,7 +220,7 @@ class FeishuNotifier:
                         "elements": [
                             {
                                 "tag": "plain_text",
-                                "content": f"由 BenchScope 情报员自动推送 | 数据已同步至飞书表格 | 下次采集: 明日 09:00"
+                                "content": f"BenchScope 自动推送  │  数据已同步至飞书表格  │  下次采集: 明日 09:00"
                             }
                         ]
                     }
