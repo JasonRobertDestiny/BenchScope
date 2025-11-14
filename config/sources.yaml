@@ -22,7 +22,7 @@ arxiv:
     - cs.SE
 
 semantic_scholar:
-  enabled: true
+  enabled: false  # 暂时禁用：无API密钥，403 Forbidden
   api_key: ${SEMANTIC_SCHOLAR_API_KEY}  # 环境变量
   lookback_years: 2
   max_results: 100
