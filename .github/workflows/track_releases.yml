@@ -2,7 +2,7 @@ name: Track Benchmark Updates
 
 on:
   schedule:
-    - cron: '0 10 * * *'
+    - cron: '30 1 * * *'  # 北京时间 09:30 (UTC+8), 与daily_collect错开30分钟
   workflow_dispatch:
 
 jobs:
