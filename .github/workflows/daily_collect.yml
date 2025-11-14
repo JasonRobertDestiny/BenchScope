@@ -2,7 +2,7 @@ name: BenchScope Daily Collection
 
 on:
   schedule:
-    - cron: '0 2 * * *'
+    - cron: '0 1 * * *'  # 北京时间 09:00 (UTC+8)
   workflow_dispatch:
 
 jobs:

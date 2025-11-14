@@ -14,13 +14,13 @@ logger = logging.getLogger(__name__)
 def prefilter(candidate: RawCandidate) -> bool:
     """Phase 3 基线预筛选规则"""
 
-    if not candidate.title or len(candidate.title.strip()) < 10:
+    if not candidate.title or len(candidate.title.strip()) < constants.PREFILTER_MIN_TITLE_LENGTH:
         logger.debug("过滤: 标题过短 - %s", candidate.title)
         return False
 
     # 摘要长度要求：HuggingFace/HELM/Semantic Scholar来源豁免（官方数据源，描述本身较短）
     if candidate.source not in {"helm", "semantic_scholar", "huggingface"}:
-        if not candidate.abstract or len(candidate.abstract.strip()) < 20:
+        if not candidate.abstract or len(candidate.abstract.strip()) < constants.PREFILTER_MIN_ABSTRACT_LENGTH:
             logger.debug("过滤: 摘要过短 - %s", candidate.title)
             return False
 
@@ -44,7 +44,7 @@ def prefilter(candidate: RawCandidate) -> bool:
     if candidate.source == "github" and not _is_quality_github_repo(candidate):
         return False
 
-    logger.debug("通过: %s", candidate.title[:50])
+    logger.debug("通过: %s", candidate.title[:constants.TITLE_TRUNCATE_SHORT])
     return True
 
 

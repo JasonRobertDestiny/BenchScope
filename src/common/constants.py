@@ -92,6 +92,7 @@ LLM_MODEL: Final[str] = LLM_DEFAULT_MODEL
 LLM_TIMEOUT_SECONDS: Final[int] = 30
 LLM_CACHE_TTL_SECONDS: Final[int] = 7 * 24 * 3600
 LLM_MAX_RETRIES: Final[int] = 3
+LLM_COMPLETION_MAX_TOKENS: Final[int] = 1600  # 提高max_tokens确保LLM推理内容更完整
 SCORE_CONCURRENCY: Final[int] = 10
 REDIS_DEFAULT_URL: Final[str] = "redis://localhost:6379/0"
 REDIS_TTL_DAYS: Final[int] = 7
@@ -119,6 +120,35 @@ SCORE_WEIGHTS: Final[dict[str, float]] = {
 FEISHU_BATCH_SIZE: Final[int] = 20
 FEISHU_RATE_LIMIT_SECONDS: Final[float] = 0.6
 FEISHU_RATE_LIMIT_DELAY: Final[float] = FEISHU_RATE_LIMIT_SECONDS
+FEISHU_BENCH_TABLE_URL: Final[str] = (
+    "https://jcnqgpxcjdms.feishu.cn/base/WgI0bpHRVacs43skW24cR6JznWg?table=tblv2kzbzt4S2NSk&view=vewiJRxzFs"
+)
+FEISHU_MEDIUM_TOPK: Final[int] = 5
+FEISHU_SOURCE_NAME_MAP: Final[dict[str, str]] = {
+    "arxiv": "arXiv",
+    "github": "GitHub",
+    "huggingface": "HuggingFace",
+    "semantic_scholar": "Semantic Scholar",
+    "helm": "HELM",
+}
+
+# 字符串截断长度
+TITLE_TRUNCATE_SHORT: Final[int] = 50   # 日志显示
+TITLE_TRUNCATE_MEDIUM: Final[int] = 60  # 摘要卡片
+TITLE_TRUNCATE_LONG: Final[int] = 150   # 详细卡片
+
+# 质量评级阈值
+QUALITY_EXCELLENT_THRESHOLD: Final[float] = 8.0
+QUALITY_GOOD_THRESHOLD: Final[float] = 7.0
+QUALITY_PASS_THRESHOLD: Final[float] = 6.5
+
+# HTTP请求配置
+HTTP_CLIENT_TIMEOUT: Final[int] = 10  # 飞书webhook请求超时(秒)
+
+# 预筛选规则
+PREFILTER_MIN_TITLE_LENGTH: Final[int] = 10
+PREFILTER_MIN_ABSTRACT_LENGTH: Final[int] = 20
+
 SQLITE_DB_PATH: Final[str] = "fallback.db"
 SQLITE_RETENTION_DAYS: Final[int] = 7
 NOTIFY_TOP_K: Final[int] = 5

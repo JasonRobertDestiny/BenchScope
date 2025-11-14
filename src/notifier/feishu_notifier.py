@@ -48,12 +48,12 @@ class FeishuNotifier:
         # 1. 推送所有高优先级卡片
         for candidate in high_priority:
             await self.send_card("🔥 发现高质量Benchmark候选", candidate)
-            await asyncio.sleep(0.5)
+            await asyncio.sleep(constants.FEISHU_RATE_LIMIT_DELAY)
 
         # 2. 推送中优先级摘要 (新增)
         if medium_priority:
             await self._send_medium_priority_summary(medium_priority)
-            await asyncio.sleep(0.5)
+            await asyncio.sleep(constants.FEISHU_RATE_LIMIT_DELAY)
 
         # 3. 推送统计摘要卡片 (支持markdown)
         summary_card = self._build_summary_card(qualified, high_priority, medium_priority)
@@ -81,44 +81,58 @@ class FeishuNotifier:
         payload = {"msg_type": "text", "content": {"text": message}}
         await self._send_webhook(payload)
 
-    async def _send_medium_priority_summary(self, candidates: List[ScoredCandidate]) -> None:
-        """发送中优先级候选摘要卡片 (Top 5详细列表)"""
-        top5 = sorted(candidates, key=lambda x: x.total_score, reverse=True)[:5]
+    @staticmethod
+    def _format_source_name(source: str) -> str:
+        """统一来源展示名称，避免多处硬编码"""
 
-        # 构建lark_md格式内容
-        content = "📊 **本次中优先级候选** (6.0-7.9分):\n\n"
-        for i, c in enumerate(top5, 1):
-            title = c.title[:60] + "..." if len(c.title) > 60 else c.title
+        fallback = source or "unknown"
+        normalized = fallback.lower()
+        return constants.FEISHU_SOURCE_NAME_MAP.get(normalized, fallback.title())
+
+    async def _send_medium_priority_summary(self, candidates: List[ScoredCandidate]) -> None:
+        """发送中优先级候选摘要卡片 - 专业简洁版"""
+        top_limit = constants.FEISHU_MEDIUM_TOPK
+        top_candidates = sorted(candidates, key=lambda x: x.total_score, reverse=True)[:top_limit]
+        avg_medium_score = sum(c.total_score for c in candidates) / len(candidates)
+
+        # 构建内容
+        content = (
+            f"**中优先级候选概览** (共 {len(candidates)} 条)\n\n"
+            f"平均分: **{avg_medium_score:.1f}** / 10  |  评分区间: 6.0 - 7.9\n\n"
+            f"**Top {top_limit} 推荐**\n\n"
+        )
+
+        for i, c in enumerate(top_candidates, 1):
+            title = c.title[:constants.TITLE_TRUNCATE_MEDIUM] + "..." if len(c.title) > constants.TITLE_TRUNCATE_MEDIUM else c.title
+            source_name = self._format_source_name(c.source)
+
             content += (
                 f"{i}. **{title}**\n"
-                f"   评分: {c.total_score:.2f}/10 | 来源: {c.source}\n"
+                f"   {source_name}  |  评分 {c.total_score:.1f}  |  "
+                f"活跃度 {c.activity_score:.1f}  |  可复现性 {c.reproducibility_score:.1f}\n"
                 f"   [查看详情]({c.url})\n\n"
             )
 
-        if len(candidates) > 5:
-            content += (
-                f"其余 **{len(candidates)-5}** 条中优先级候选请在"
-                "[飞书表格](https://jcnqgpxcjdms.feishu.cn/base/WgI0bpHRVacs43skW24cR6JznWg)"
-                "查看"
-            )
+        if len(candidates) > top_limit:
+            content += f"\n其余 {len(candidates)-top_limit} 条候选请在飞书表格查看"
 
-        # 构建交互式卡片
         card = {
             "msg_type": "interactive",
             "card": {
                 "header": {
-                    "title": {"tag": "plain_text", "content": "中优先级候选摘要"},
+                    "title": {"tag": "plain_text", "content": "中优先级候选推荐"},
                     "template": "yellow",
                 },
                 "elements": [
                     {"tag": "div", "text": {"tag": "lark_md", "content": content}},
+                    {"tag": "hr"},
                     {
                         "tag": "action",
                         "actions": [
                             {
                                 "tag": "button",
-                                "text": {"content": "📊 查看完整表格", "tag": "plain_text"},
-                                "url": "https://jcnqgpxcjdms.feishu.cn/base/WgI0bpHRVacs43skW24cR6JznWg?table=tblv2kzbzt4S2NSk&view=vewiJRxzFs",
+                                "text": {"content": "查看完整表格", "tag": "plain_text"},
+                                "url": constants.FEISHU_BENCH_TABLE_URL,
                                 "type": "primary",
                             }
                         ],
@@ -137,35 +151,93 @@ class FeishuNotifier:
     ) -> dict:
         """构建统计摘要卡片 (支持markdown渲染)"""
         avg_score = sum(c.total_score for c in qualified) / len(qualified)
+
+        # 统计数据源分布
+        source_counts = {}
+        for c in qualified:
+            source_counts[c.source] = source_counts.get(c.source, 0) + 1
+
+        # 格式化数据源分布
+        source_breakdown = ", ".join(
+            f"{self._format_source_name(src)}: {cnt}" for src, cnt in sorted(source_counts.items())
+        )
+
+        # 统计分数分布
+        score_ranges = {
+            "9.0+": len([c for c in qualified if c.total_score >= 9.0]),
+            "8.0-8.9": len([c for c in qualified if 8.0 <= c.total_score < 9.0]),
+            "7.0-7.9": len([c for c in qualified if 7.0 <= c.total_score < 8.0]),
+            "6.0-6.9": len([c for c in qualified if 6.0 <= c.total_score < 7.0]),
+        }
+
+        # 质量评级
+        if avg_score >= constants.QUALITY_EXCELLENT_THRESHOLD:
+            quality_indicator = "优质"
+        elif avg_score >= constants.QUALITY_GOOD_THRESHOLD:
+            quality_indicator = "良好"
+        elif avg_score >= constants.QUALITY_PASS_THRESHOLD:
+            quality_indicator = "合格"
+        else:
+            quality_indicator = "一般"
+
         content = (
-            "📈 **本次采集完成**\n\n"
-            f"- 🔴 高优先级: {len(high_priority)} 条 (已发卡片)\n"
-            f"- 🟡 中优先级: {len(medium_priority)} 条 (已发摘要)\n"
-            f"- 📊 平均分: {avg_score:.2f}/10\n\n"
-            "详细候选请查看上方消息或飞书表格。"
+            f"**本次采集完成** - {datetime.now().strftime('%Y-%m-%d %H:%M')}\n\n"
+            "**候选统计**\n"
+            f"- 高优先级 (≥8.0): **{len(high_priority)}** 条 (已发卡片)\n"
+            f"- 中优先级 (6.0-7.9): **{len(medium_priority)}** 条 (已发摘要)\n"
+            f"- 总计: **{len(qualified)}** 条合格候选\n\n"
+            "**质量指标**\n"
+            f"- 平均分: **{avg_score:.2f}/10** {quality_indicator}\n"
+            f"- 分数分布: {score_ranges['9.0+']}个卓越 | {score_ranges['8.0-8.9']}个优秀 | {score_ranges['7.0-7.9']}个良好 | {score_ranges['6.0-6.9']}个合格\n\n"
+            "**来源分布**\n"
+            f"- {source_breakdown}\n\n"
+            f"详细候选请查看上方消息或[飞书表格]({constants.FEISHU_BENCH_TABLE_URL})"
         )
 
         return {
             "msg_type": "interactive",
             "card": {
                 "header": {
-                    "title": {"tag": "plain_text", "content": "采集统计"},
+                    "title": {"tag": "plain_text", "content": "🎯 BenchScope 采集报告"},
                     "template": "blue",
                 },
                 "elements": [
                     {"tag": "div", "text": {"tag": "lark_md", "content": content}},
+                    {
+                        "tag": "hr"
+                    },
+                    {
+                        "tag": "note",
+                        "elements": [
+                            {
+                                "tag": "plain_text",
+                                "content": f"由 BenchScope 情报员自动推送 | 数据已同步至飞书表格 | 下次采集: 明日 09:00"
+                            }
+                        ]
+                    }
                 ],
             },
         }
 
     def _build_card(self, title: str, candidate: ScoredCandidate) -> dict:
-        emoji = {"high": "🔴", "medium": "🟡", "low": "🟢"}.get(candidate.priority, "🟢")
+        """构建高优先级候选卡片 - 专业简洁版"""
+        priority_label = {"high": "高优先级", "medium": "中优先级", "low": "低优先级"}.get(
+            candidate.priority, "低优先级"
+        )
+
+        source_name = self._format_source_name(candidate.source)
+
         content = (
-            f"**标题**: {candidate.title[:100]}\n"
-            f"**来源**: {candidate.source}\n"
-            f"**总分**: {candidate.total_score:.2f}/10 ({emoji} {candidate.priority})\n"
-            f"**活跃度**: {candidate.activity_score:.1f} | **可复现性**: {candidate.reproducibility_score:.1f}\n\n"
-            f"📊 **评分依据**:\n{candidate.reasoning[:400]}"
+            f"**{candidate.title[:constants.TITLE_TRUNCATE_LONG]}**\n\n"
+            f"综合评分: **{candidate.total_score:.1f}** / 10  |  优先级: **{priority_label}**\n\n"
+            "**评分细项**\n"
+            f"活跃度 {candidate.activity_score:.1f}  |  "
+            f"可复现性 {candidate.reproducibility_score:.1f}  |  "
+            f"许可合规 {candidate.license_score:.1f}  |  "
+            f"任务新颖性 {candidate.novelty_score:.1f}  |  "
+            f"MGX适配度 {candidate.relevance_score:.1f}\n\n"
+            f"**来源**: {source_name}\n\n"
+            f"**评分依据**\n{candidate.reasoning}"
         )
 
         actions = [
@@ -173,26 +245,48 @@ class FeishuNotifier:
                 "tag": "button",
                 "text": {"content": "查看详情", "tag": "plain_text"},
                 "url": candidate.url,
-                "type": "default",
+                "type": "primary",
             },
             {
                 "tag": "button",
-                "text": {"content": "📊 查看完整表格", "tag": "plain_text"},
-                "url": "https://jcnqgpxcjdms.feishu.cn/base/WgI0bpHRVacs43skW24cR6JznWg?table=tblv2kzbzt4S2NSk&view=vewiJRxzFs",
+                "text": {"content": "飞书表格", "tag": "plain_text"},
+                "url": constants.FEISHU_BENCH_TABLE_URL,
                 "type": "default",
             },
         ]
+
+        # 如果有GitHub链接，添加GitHub按钮
+        if candidate.github_url and candidate.github_url != candidate.url:
+            actions.insert(
+                1,
+                {
+                    "tag": "button",
+                    "text": {"content": "GitHub", "tag": "plain_text"},
+                    "url": candidate.github_url,
+                    "type": "default",
+                },
+            )
 
         return {
             "msg_type": "interactive",
             "card": {
                 "header": {
                     "title": {"tag": "plain_text", "content": title},
-                    "template": "blue" if candidate.priority == "high" else "green",
+                    "template": "red" if candidate.priority == "high" else "blue",
                 },
                 "elements": [
                     {"tag": "div", "text": {"tag": "lark_md", "content": content}},
+                    {"tag": "hr"},
                     {"tag": "action", "actions": actions},
+                    {
+                        "tag": "note",
+                        "elements": [
+                            {
+                                "tag": "plain_text",
+                                "content": f"BenchScope 情报员 | {datetime.now().strftime('%Y-%m-%d %H:%M')}",
+                            }
+                        ],
+                    },
                 ],
             },
         }
@@ -215,7 +309,7 @@ class FeishuNotifier:
             payload["sign"] = sign
             logger.debug("Webhook签名已添加: timestamp=%s", timestamp)
 
-        async with httpx.AsyncClient(timeout=10) as client:
+        async with httpx.AsyncClient(timeout=constants.HTTP_CLIENT_TIMEOUT) as client:
             resp = await client.post(self.webhook_url, json=payload)
             resp.raise_for_status()
             data = resp.json()

@@ -114,7 +114,7 @@ MGX适配度评估标准(relevance_score):
                     {"role": "user", "content": self._build_prompt(candidate)},
                 ],
                 temperature=0.2,
-                max_tokens=400,
+                max_tokens=constants.LLM_COMPLETION_MAX_TOKENS,  # 提升token上限确保reasoning更完整
             ),
             timeout=constants.LLM_TIMEOUT_SECONDS,
         )
@@ -181,9 +181,37 @@ MGX适配度评估标准(relevance_score):
 4. 任务新颖性(novelty_score): 是否提供全新 Benchmark 或方法
 5. MGX适配度(relevance_score): 是否贴合多智能体/代码/工具使用场景
 
-**重要**: reasoning字段必须**基于上述具体数据**给出判断,格式如下:
-【活跃度】引用具体stars数字或更新时间；【可复现性】具体说明哪些资源开源(代码/数据/文档)；【许可合规】明确指出License类型；【新颖性】对比已有方法的具体区别；【MGX适配度】明确说明与多智能体/代码生成的关联。
-**禁止使用**"GitHub stars较高"、"近期有更新"等模糊描述,必须用具体数字和事实。
+**重要**: reasoning字段必须详细、具体、基于事实数据，**最少200字**，格式要求:
+
+【活跃度分析】
+- 必须引用具体stars数量（如"GitHub 1,500+ stars"）
+- 必须说明最近更新情况（如"近30天有X次提交"或"最后更新于X天前"）
+- 评估社区活跃度和维护状态
+
+【可复现性分析】
+- 具体列举开源内容：代码仓库/数据集/评估脚本/技术文档
+- 说明文档质量（如"包含详细README、API文档、使用示例"）
+- 评估复现成本和门槛
+
+【许可合规分析】
+- 明确指出License类型（如"MIT License"、"Apache-2.0"）
+- 说明是否适合商业使用
+- 如果未知License，明确标注并扣分
+
+【任务新颖性分析】
+- 说明该Benchmark的核心创新点
+- 对比已有同类Benchmark的差异（如"相比HumanEval增加了X维度"）
+- 评估学术/工业价值
+
+【MGX适配度分析】
+- 明确说明与多智能体协作/代码生成/工具使用的关联
+- 列举具体评测维度（如"测试Agent规划能力"、"评估代码生成质量"）
+- 解释为何适合或不适合MGX场景
+
+**禁止使用模糊描述**:
+- ❌ "GitHub stars较高" → ✅ "GitHub 1,500 stars"
+- ❌ "近期有更新" → ✅ "最后更新于7天前，近30天有12次提交"
+- ❌ "代码开源" → ✅ "代码仓库完全开源，包含训练脚本、评估代码和完整文档"
 
 请输出JSON,示例:
 {{

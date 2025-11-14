@@ -1,4 +1,99 @@
+# BenchScope 数据源配置
+# 说明: 此文件定义所有数据采集源的参数，支持运行时修改无需重新部署
+
+# ============================================================
+# 论文库 (Academic Papers)
+# ============================================================
+
+arxiv:
+  enabled: true
+  max_results: 50
+  lookback_hours: 168  # 7天窗口
+  timeout_seconds: 10
+  max_retries: 3
+  keywords:
+    - benchmark
+    - agent evaluation
+    - code generation
+    - web automation
+  categories:
+    - cs.AI
+    - cs.CL
+    - cs.SE
+
+semantic_scholar:
+  enabled: true
+  api_key: ${SEMANTIC_SCHOLAR_API_KEY}  # 环境变量
+  lookback_years: 2
+  max_results: 100
+  timeout_seconds: 15
+  venues:
+    # AI/ML顶会
+    - NeurIPS
+    - ICLR
+    - ICML
+    # NLP顶会
+    - ACL
+    - EMNLP
+    - NAACL
+    # CV顶会
+    - CVPR
+    - ICCV
+    - ECCV
+    # 数据挖掘
+    - KDD
+    - WWW
+  keywords:
+    - benchmark
+    - evaluation
+    - dataset
+    - leaderboard
+    - test set
+
+# ============================================================
+# 评测榜单 (Leaderboards)
+# ============================================================
+
+helm:
+  enabled: true
+  base_url: "https://crfm.stanford.edu/helm/classic/latest/"
+  storage_base: "https://storage.googleapis.com/crfm-helm-public/benchmark_output"
+  default_release: "v0.4.0"
+  timeout_seconds: 15
+
+open_llm_leaderboard:
+  enabled: false  # Phase 6 待实现
+  api_url: "https://huggingface.co/api/open-llm-leaderboard/v1/submissions"
+  min_score: 60.0  # 只采集高分模型的评测数据
+  lookback_days: 30
+
+evalplus:
+  enabled: false  # Phase 6 待实现
+  github_repo: "evalplus/evalplus"
+  api_url: "https://evalplus.github.io/leaderboard.html"
+  timeout_seconds: 15
+
+# ============================================================
+# 开源社区 (Open Source Platforms)
+# ============================================================
+
+github:
+  enabled: true
+  trending_url: "https://github.com/trending"
+  search_api: "https://api.github.com/search/repositories"
+  topics:
+    - benchmark
+    - evaluation
+    - agent
+  min_stars: 0  # 预筛选阶段会提高到10
+  lookback_days: 30
+  timeout_seconds: 5
+  # GitHub API Token (可选,有token可提升限额到5000请求/小时)
+  token: ${GITHUB_TOKEN}
+
 huggingface:
+  enabled: true
+  api_url: "https://huggingface.co/api/datasets"
   keywords:
     - benchmark
     - evaluation
@@ -7,5 +102,66 @@ huggingface:
     - text-generation
     - question-answering
     - code
-  min_downloads: 10
-  limit: 50
+  min_downloads: 100
+  max_results: 50
+  lookback_days: 14
+
+# ============================================================
+# 团队线索 (Internal Sources)
+# ============================================================
+
+feishu_chat:
+  enabled: false  # Phase 7+ 功能
+  app_id: ${FEISHU_APP_ID}
+  app_secret: ${FEISHU_APP_SECRET}
+  monitored_groups:
+    - "Benchmark研究群"
+    - "AI技术讨论组"
+  keywords:
+    - benchmark
+    - 评测
+    - dataset
+  lookback_days: 7
+
+# ============================================================
+# 社交媒体 (Social Media) - 可选
+# ============================================================
+
+twitter:
+  enabled: false  # Phase 7+ 功能
+  api_key: ${TWITTER_API_KEY}
+  api_secret: ${TWITTER_API_SECRET}
+  monitored_accounts:
+    - "@paperswithcode"
+    - "@huggingface"
+    - "@GoogleAI"
+  keywords:
+    - "#benchmark"
+    - "#evaluation"
+    - "#LLM"
+  lookback_days: 3
+
+# ============================================================
+# 全局配置 (Global Settings)
+# ============================================================
+
+global:
+  # 并发控制
+  max_concurrent_collectors: 5
+
+  # 去重策略
+  deduplication:
+    url_normalization: true  # 标准化URL (去除查询参数)
+    title_similarity_threshold: 0.9  # 标题相似度阈值
+
+  # 时间窗口自适应
+  adaptive_window:
+    enabled: true
+    min_candidates_per_run: 5  # 如果采集数<5,自动扩大时间窗口
+    max_lookback_multiplier: 3  # 最多扩大到原窗口的3倍
+
+  # 错误处理
+  error_handling:
+    retry_on_timeout: true
+    max_retries: 3
+    fallback_to_cache: true  # API失败时使用缓存数据
