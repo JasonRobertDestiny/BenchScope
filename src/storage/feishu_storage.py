@@ -28,41 +28,24 @@ class FeishuStorage:
         "source": "来源",
         "url": "URL",
         "abstract": "摘要",
-        # 评分维度（v1兼容）
+        # 评分维度
         "activity_score": "活跃度",
         "reproducibility_score": "可复现性",
-        "license_score": "许可合规性",  # 修正: 飞书实际字段有"性"字
+        "license_score": "许可合规性",
         "novelty_score": "任务新颖性",
         "relevance_score": "MGX适配度",
         "total_score": "总分",
         "priority": "优先级",
         "reasoning": "评分依据",
         "status": "状态",
-        # 能力域（Phase 7.2）
-        "planning_score": "规划能力",
-        "tool_use_score": "工具使用能力",
-        "memory_score": "记忆能力",
-        "collaboration_score": "协作能力",
-        "reasoning_score": "推理能力",
-        # 风险域（Phase 7.2）
-        "security_score": "安全性",
-        "robustness_score": "鲁棒性",
-        "hallucination_risk": "幻觉风险",
-        "compliance_score": "合规性",
-        # 汇总字段
-        "capability_total": "能力域总分",
-        "risk_total": "风险域总分",
-        "operational_total": "运营域总分",
-        "risk_level": "风险等级",
-        "evaluation_version": "评估版本",
         # Phase 6 新增字段（必需，支撑"一键添加"核心目标）
-        "paper_url": "论文URL",  # 修正: 飞书实际字段无空格
+        "paper_url": "论文URL",
         "github_stars": "GitHub Stars",
         "authors": "作者信息",
         "publish_date": "开源时间",
         "reproduction_script_url": "复现脚本链接",
-        "evaluation_metrics": "评估指标摘要",  # 修正: 飞书实际字段是"评估"不是"评价"
-        "dataset_url": "数据集URL",  # 修正: 飞书实际字段无空格
+        "evaluation_metrics": "评估指标摘要",
+        "dataset_url": "数据集URL",
         "task_type": "任务类型",
         "license_type": "License类型",
     }
