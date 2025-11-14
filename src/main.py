@@ -35,7 +35,7 @@ async def main() -> None:
     logger.info("[1/5] 数据采集...")
     collectors = [
         ArxivCollector(),
-        SemanticScholarCollector(),
+        # SemanticScholarCollector(),  # 暂时禁用：无API密钥
         HelmCollector(),
         GitHubCollector(),
         HuggingFaceCollector(settings=settings),
