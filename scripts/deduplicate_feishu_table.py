@@ -2,6 +2,7 @@
 
 用法: python scripts/deduplicate_feishu_table.py
 """
+
 import asyncio
 import sys
 from collections import defaultdict
@@ -60,10 +61,12 @@ async def main():
             url_value = url_obj
 
         if url_value:
-            url_to_records[url_value].append({
-                "record_id": record.get("record_id"),
-                "created_time": record.get("created_time", 0),
-            })
+            url_to_records[url_value].append(
+                {
+                    "record_id": record.get("record_id"),
+                    "created_time": record.get("created_time", 0),
+                }
+            )
 
     # 3. 找出重复记录
     to_delete = []
@@ -71,7 +74,9 @@ async def main():
     for url, records in url_to_records.items():
         if len(records) > 1:
             print(f"\n⚠️  URL重复{len(records)}次: {url[:60]}...")
-            records_sorted = sorted(records, key=lambda x: x["created_time"], reverse=True)
+            records_sorted = sorted(
+                records, key=lambda x: x["created_time"], reverse=True
+            )
             for old_record in records_sorted[1:]:
                 to_delete.append(old_record["record_id"])
 
@@ -92,7 +97,9 @@ async def main():
 
         for i in range(0, len(to_delete), 500):
             batch = to_delete[i : i + 500]
-            delete_resp = await client.post(delete_url, headers=storage._auth_header(), json={"records": batch})
+            delete_resp = await client.post(
+                delete_url, headers=storage._auth_header(), json={"records": batch}
+            )
             delete_resp.raise_for_status()
 
             if delete_resp.json().get("code") != 0:

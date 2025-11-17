@@ -4,6 +4,7 @@
 
 用法: python scripts/clear_feishu_table.py
 """
+
 import asyncio
 import sys
 from pathlib import Path
@@ -36,7 +37,9 @@ async def main():
             if page_token:
                 payload["page_token"] = page_token
 
-            resp = await client.post(search_url, headers=storage._auth_header(), json=payload)
+            resp = await client.post(
+                search_url, headers=storage._auth_header(), json=payload
+            )
             resp.raise_for_status()
             data = resp.json()
 
@@ -45,7 +48,9 @@ async def main():
                 return
 
             items = data.get("data", {}).get("items", [])
-            all_record_ids.extend([item["record_id"] for item in items if item.get("record_id")])
+            all_record_ids.extend(
+                [item["record_id"] for item in items if item.get("record_id")]
+            )
 
             if not data.get("data", {}).get("has_more", False):
                 break
@@ -63,7 +68,9 @@ async def main():
     async with httpx.AsyncClient(timeout=10) as client:
         for i in range(0, len(all_record_ids), 500):
             batch = all_record_ids[i : i + 500]
-            delete_resp = await client.post(delete_url, headers=storage._auth_header(), json={"records": batch})
+            delete_resp = await client.post(
+                delete_url, headers=storage._auth_header(), json={"records": batch}
+            )
             delete_resp.raise_for_status()
 
             if delete_resp.json().get("code") != 0:

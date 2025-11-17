@@ -1,11 +1,11 @@
 """GitHub Release 版本跟踪器"""
+
 from __future__ import annotations
 
 import logging
 import re
 import sqlite3
-from dataclasses import asdict
-from datetime import datetime, timezone
+from datetime import datetime
 from pathlib import Path
 from typing import List, Optional
 
@@ -19,7 +19,9 @@ logger = logging.getLogger(__name__)
 class GitHubReleaseTracker:
     """监控GitHub仓库的最新Release"""
 
-    def __init__(self, db_path: str = "fallback.db", github_token: Optional[str] = None) -> None:
+    def __init__(
+        self, db_path: str = "fallback.db", github_token: Optional[str] = None
+    ) -> None:
         self.db_path = Path(db_path)
         self.github_token = github_token
         self._init_db()
@@ -51,7 +53,9 @@ class GitHubReleaseTracker:
         logger.debug("无法解析GitHub仓库地址: %s", repo_url)
         return None
 
-    def _build_headers(self, accept: str = "application/vnd.github+json") -> dict[str, str]:
+    def _build_headers(
+        self, accept: str = "application/vnd.github+json"
+    ) -> dict[str, str]:
         headers = {"Accept": accept}
         if self.github_token:
             headers["Authorization"] = f"Bearer {self.github_token}"
@@ -79,7 +83,9 @@ class GitHubReleaseTracker:
 
         return new_releases
 
-    async def _fetch_latest_release(self, client: httpx.AsyncClient, repo_url: str) -> Optional[GitHubRelease]:
+    async def _fetch_latest_release(
+        self, client: httpx.AsyncClient, repo_url: str
+    ) -> Optional[GitHubRelease]:
         owner_repo = self._extract_owner_repo(repo_url)
         if not owner_repo:
             return None
@@ -118,7 +124,9 @@ class GitHubReleaseTracker:
         )
 
     def _is_recorded(self, release: GitHubRelease) -> bool:
-        query = "SELECT 1 FROM github_releases WHERE repo_url = ? AND tag_name = ? LIMIT 1"
+        query = (
+            "SELECT 1 FROM github_releases WHERE repo_url = ? AND tag_name = ? LIMIT 1"
+        )
         with sqlite3.connect(self.db_path) as conn:
             row = conn.execute(query, (release.repo_url, release.tag_name)).fetchone()
             return row is not None

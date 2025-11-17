@@ -1,5 +1,5 @@
-# BenchScope 数据源配置
-# 说明: 此文件定义所有数据采集源的参数，支持运行时修改无需重新部署
+# BenchScope 数据源配置 - Phase 7聚焦版
+# 说明: 所有采集器参数均可通过此文件调整,修改后下次运行立即生效
 
 # ============================================================
 # 论文库 (Academic Papers)
@@ -11,44 +11,68 @@ arxiv:
   lookback_hours: 168  # 7天窗口
   timeout_seconds: 10
   max_retries: 3
+
+  # Phase 7: 聚焦MGX核心场景关键词
   keywords:
-    - benchmark
-    - agent evaluation
-    - code generation
-    - web automation
+    # P0 - 编程与代码
+    - code generation benchmark
+    - code evaluation
+    - programming benchmark
+    - software engineering benchmark
+    - program synthesis evaluation
+    - code completion benchmark
+
+    # P0 - Web自动化
+    - web agent benchmark
+    - browser automation benchmark
+    - web navigation evaluation
+    - GUI automation benchmark
+
+    # P1 - 多智能体
+    - multi-agent benchmark
+    - agent collaboration evaluation
+    - tool use benchmark
+    - API usage benchmark
+
+    # Phase 6.5 - 后端开发能力
+    - backend development benchmark
+    - API design benchmark
+    - RESTful API evaluation
+    - GraphQL performance benchmark
+    - database query benchmark
+    - SQL optimization benchmark
+    - microservices benchmark
+    - distributed systems benchmark
+    - system design evaluation
+    - backend framework benchmark
+    - server performance benchmark
+    - web framework comparison
+
   categories:
-    - cs.AI
-    - cs.CL
-    - cs.SE
+    - cs.SE  # Software Engineering
+    - cs.AI  # Artificial Intelligence
+    - cs.CL  # Computation and Language
+    - cs.DC  # Distributed Computing
+    - cs.DB  # Databases
+    - cs.NI  # Networking and Internet
 
 semantic_scholar:
-  enabled: false  # 暂时禁用：无API密钥，403 Forbidden
-  api_key: ${SEMANTIC_SCHOLAR_API_KEY}  # 环境变量
+  enabled: false  # 暂时禁用: 无API密钥
+  api_key: ${SEMANTIC_SCHOLAR_API_KEY}
   lookback_years: 2
   max_results: 100
   timeout_seconds: 15
   venues:
-    # AI/ML顶会
     - NeurIPS
     - ICLR
     - ICML
-    # NLP顶会
     - ACL
     - EMNLP
     - NAACL
-    # CV顶会
-    - CVPR
-    - ICCV
-    - ECCV
-    # 数据挖掘
-    - KDD
-    - WWW
   keywords:
     - benchmark
     - evaluation
     - dataset
-    - leaderboard
-    - test set
 
 # ============================================================
 # 评测榜单 (Leaderboards)
@@ -61,14 +85,47 @@ helm:
   default_release: "v0.4.0"
   timeout_seconds: 15
 
+  # Phase 7: 任务类型白名单
+  allowed_scenarios:
+    - code
+    - coding
+    - program
+    - reasoning
+    - math
+    - logic
+    - tool
+    - api
+    - agent
+    - web
+    - browser
+    - gui
+
+  # Phase 7: 任务类型黑名单
+  excluded_scenarios:
+    - qa
+    - question
+    - answer
+    - reading
+    - comprehension
+    - dialogue
+    - conversation
+    - summarization
+    - summary
+    - translation
+    - sentiment
+    - classification
+    - image
+    - vision
+    - video
+
 open_llm_leaderboard:
-  enabled: false  # Phase 6 待实现
+  enabled: false  # Phase 6待接入
   api_url: "https://huggingface.co/api/open-llm-leaderboard/v1/submissions"
-  min_score: 60.0  # 只采集高分模型的评测数据
+  min_score: 60.0
   lookback_days: 30
 
 evalplus:
-  enabled: false  # Phase 6 待实现
+  enabled: false  # Phase 6待接入
   github_repo: "evalplus/evalplus"
   api_url: "https://evalplus.github.io/leaderboard.html"
   timeout_seconds: 15
@@ -81,27 +138,85 @@ github:
   enabled: true
   trending_url: "https://github.com/trending"
   search_api: "https://api.github.com/search/repositories"
+
+  # Phase 7: 聚焦MGX话题
   topics:
-    - benchmark
-    - evaluation
-    - agent
-  min_stars: 0  # 预筛选阶段会提高到10
+    # P0 - 编程
+    - code-generation
+    - code-benchmark
+    - program-synthesis
+    - coding-challenge
+    - software-testing
+
+    # P0 - Web自动化
+    - web-automation
+    - browser-automation
+    - web-agent
+    - selenium-testing
+    - playwright
+
+    # P1 - GUI/Agents
+    - gui-automation
+    - agent-benchmark
+    - multi-agent
+    - llm-agent
+
+    # Phase 6.5 - 后端开发能力
+    - backend-benchmark
+    - api-benchmark
+    - database-benchmark
+    - microservices-benchmark
+    - distributed-systems
+    - system-design
+    - restful-api
+    - graphql
+    - performance-testing
+    - load-testing
+    - api-testing
+    - backend-framework
+    - server-benchmark
+    - web-framework-benchmark
+    - database-performance
+    - sql-benchmark
+
+  languages:
+    - Python
+    - JavaScript
+    - TypeScript
+    - Go
+    - Java
+    - Rust
+
+  min_stars: 50
   lookback_days: 30
   timeout_seconds: 5
-  # GitHub API Token (可选,有token可提升限额到5000请求/小时)
   token: ${GITHUB_TOKEN}
+
+  # Phase 7: 质量指标
+  min_readme_length: 500
+  max_days_since_update: 90
 
 huggingface:
   enabled: true
   api_url: "https://huggingface.co/api/datasets"
+
+  # Phase 7: 收敛关键词+任务类别
   keywords:
-    - benchmark
-    - evaluation
-    - leaderboard
-  task_categories:
-    - text-generation
-    - question-answering
     - code
+    - programming
+    - software
+    - benchmark
+    - backend
+    - api
+    - database
+    - sql
+    - microservices
+    - system-design
+
+  task_categories:
+    - code
+    - software-engineering
+
   min_downloads: 100
   max_results: 50
   lookback_days: 14
@@ -111,57 +226,65 @@ huggingface:
 # ============================================================
 
 feishu_chat:
-  enabled: false  # Phase 7+ 功能
+  enabled: false  # Phase 7+
   app_id: ${FEISHU_APP_ID}
   app_secret: ${FEISHU_APP_SECRET}
   monitored_groups:
     - "Benchmark研究群"
-    - "AI技术讨论组"
   keywords:
     - benchmark
     - 评测
-    - dataset
   lookback_days: 7
 
 # ============================================================
-# 社交媒体 (Social Media) - 可选
+# 社交媒体 (Social Media)
 # ============================================================
 
 twitter:
-  enabled: false  # Phase 7+ 功能
+  enabled: false  # Phase 7+
   api_key: ${TWITTER_API_KEY}
   api_secret: ${TWITTER_API_SECRET}
   monitored_accounts:
     - "@paperswithcode"
     - "@huggingface"
-    - "@GoogleAI"
   keywords:
     - "#benchmark"
     - "#evaluation"
-    - "#LLM"
   lookback_days: 3
+
+# ============================================================
+# 后端专项数据源 (Backend-Specific Sources)
+# ============================================================
+
+techempower:
+  enabled: true
+  base_url: "https://tfb-status.techempower.com"
+  timeout_seconds: 15
+  min_composite_score: 50.0
+
+dbengines:
+  enabled: true
+  base_url: "https://db-engines.com/en"
+  timeout_seconds: 15
+  max_results: 50
 
 # ============================================================
 # 全局配置 (Global Settings)
 # ============================================================
 
 global:
-  # 并发控制
   max_concurrent_collectors: 5
 
-  # 去重策略
   deduplication:
-    url_normalization: true  # 标准化URL (去除查询参数)
-    title_similarity_threshold: 0.9  # 标题相似度阈值
+    url_normalization: true
+    title_similarity_threshold: 0.9
 
-  # 时间窗口自适应
   adaptive_window:
     enabled: true
-    min_candidates_per_run: 5  # 如果采集数<5,自动扩大时间窗口
-    max_lookback_multiplier: 3  # 最多扩大到原窗口的3倍
+    min_candidates_per_run: 5
+    max_lookback_multiplier: 3
 
-  # 错误处理
   error_handling:
     retry_on_timeout: true
     max_retries: 3
-    fallback_to_cache: true  # API失败时使用缓存数据
+    fallback_to_cache: true

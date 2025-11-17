@@ -1,11 +1,12 @@
 """Semantic Scholar 会议论文采集器"""
+
 from __future__ import annotations
 
 import asyncio
 import logging
 import os
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, cast
 
 import httpx
 
@@ -34,17 +35,19 @@ class SemanticScholarCollector:
             logger.warning("未设置SEMANTIC_SCHOLAR_API_KEY,跳过Semantic Scholar采集")
             return []
 
-        async with httpx.AsyncClient(timeout=self.timeout, headers=self._build_headers()) as client:
+        async with httpx.AsyncClient(
+            timeout=self.timeout, headers=self._build_headers()
+        ) as client:
             tasks = [self._fetch_venue(client, venue) for venue in self.venues]
             results = await asyncio.gather(*tasks, return_exceptions=True)
 
         candidates: List[RawCandidate] = []
         seen_ids: set[str] = set()
         for venue, result in zip(self.venues, results, strict=False):
-            if isinstance(result, Exception):
+            if isinstance(result, BaseException):
                 logger.error("Semantic Scholar API任务失败(%s): %s", venue, result)
                 continue
-            for candidate in result:
+            for candidate in cast(List[RawCandidate], result):
                 paper_id = candidate.raw_metadata.get("paper_id")
                 if paper_id and paper_id in seen_ids:
                     continue
@@ -55,7 +58,9 @@ class SemanticScholarCollector:
         logger.info("Semantic Scholar采集完成,候选总数%s", len(candidates))
         return candidates
 
-    async def _fetch_venue(self, client: httpx.AsyncClient, venue: str) -> List[RawCandidate]:
+    async def _fetch_venue(
+        self, client: httpx.AsyncClient, venue: str
+    ) -> List[RawCandidate]:
         """调用API,按会议+关键词筛选论文"""
 
         params = self._build_query_params(venue)
@@ -86,12 +91,27 @@ class SemanticScholarCollector:
     def _to_candidate(self, paper: Dict[str, Any]) -> RawCandidate:
         """将API返回转换为内部RawCandidate结构"""
 
-        publish_date = self._parse_publish_date(paper.get("publicationDate"), paper.get("year"))
-        authors = [item.get("name") for item in paper.get("authors", []) if item.get("name")]
+        publish_date = self._parse_publish_date(
+            paper.get("publicationDate"), paper.get("year")
+        )
+        authors = [
+            item.get("name") for item in paper.get("authors", []) if item.get("name")
+        ]
 
         # Phase 6字段提取
         # paper_url: Semantic Scholar论文URL (与url相同)
         paper_url = paper.get("url")
+
+        fields_of_study = paper.get("fieldsOfStudy") or []
+        fields_str = ",".join(str(item) for item in fields_of_study) if fields_of_study else ""
+        raw_metadata = {
+            "paper_id": str(paper.get("paperId") or ""),
+            "venue": str(paper.get("venue") or ""),
+            "year": str(paper.get("year") or ""),
+            "citation_count": str(paper.get("citationCount") or ""),
+            "fields_of_study": fields_str,
+            "open_access_pdf": str((paper.get("openAccessPdf") or {}).get("url") or ""),
+        }
 
         return RawCandidate(
             title=paper.get("title") or "",
@@ -101,23 +121,20 @@ class SemanticScholarCollector:
             authors=authors or None,
             publish_date=publish_date,
             paper_url=paper_url,  # Phase 6: 论文URL（Semantic Scholar提供）
-            raw_metadata={
-                "paper_id": paper.get("paperId"),
-                "venue": paper.get("venue"),
-                "year": paper.get("year"),
-                "citation_count": paper.get("citationCount"),
-                "fields_of_study": paper.get("fieldsOfStudy"),
-                "open_access_pdf": (paper.get("openAccessPdf") or {}).get("url"),
-            },
+            raw_metadata=raw_metadata,
         )
 
     @staticmethod
-    def _parse_publish_date(date_str: Optional[str], year: Optional[int]) -> Optional[datetime]:
+    def _parse_publish_date(
+        date_str: Optional[str], year: Optional[int]
+    ) -> Optional[datetime]:
         """解析发布日期,兜底使用年份"""
 
         if date_str:
             try:
-                return datetime.fromisoformat(date_str.replace("Z", "+00:00")).astimezone(timezone.utc)
+                return datetime.fromisoformat(
+                    date_str.replace("Z", "+00:00")
+                ).astimezone(timezone.utc)
             except ValueError:
                 logger.debug("Semantic Scholar日期格式异常:%s", date_str)
         if year:

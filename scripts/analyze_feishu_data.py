@@ -19,7 +19,9 @@ async def main():
 
     async with httpx.AsyncClient(timeout=30) as client:
         # 获取access token
-        token_url = "https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal"
+        token_url = (
+            "https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal"
+        )
         token_resp = await client.post(
             token_url,
             json={

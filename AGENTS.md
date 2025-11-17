@@ -1,32 +1,41 @@
 # Repository Guidelines
 
+本文件为 BenchScope 仓库贡献者与智能代理（AI 助手）的统一协作规范，请在提交代码前快速浏览一遍。
+
 ## Project Structure & Module Organization
-- `src/` 以功能域拆分：`collectors/`(多源采集器)、`prefilter/`、`scorer/`、`storage/`、`notifier/`、`tracker/`；公共常量放在 `src/common/constants.py`，数据模型位于 `src/models.py`。
-- `config/` 存放 YAML 配置；`docs/` 用于 PRD、测试报告和样例；`scripts/` 提供辅助工具（日志分析、版本跟踪等）。
-- 测试位于 `tests/unit` 与 `tests/integration`（如存在），夹具放在 `tests/fixtures`。
+
+- 业务代码在 `src/`：如 `collectors/`（数据采集）、`prefilter/`（规则预筛）、`scorer/`（LLM 评分）、`storage/`（飞书与 SQLite 存储）、`notifier/`（飞书通知）、`tracker/`（版本跟踪）、`api/`（API/Callback 服务）。
+- 配置在 `config/`（如 `config/sources.yaml`），公共常量在 `src/common/constants.py`。
+- 实用脚本在 `scripts/`（日志分析、飞书表同步、版本跟踪等），文档在 `docs/`，运行日志在 `logs/`。
 
 ## Build, Test, and Development Commands
-- `uv run python src/main.py`：执行完整采集→评分→存储→通知 pipeline。
-- `PYTHONPATH=. uv run pytest tests/unit -m "not slow"`：运行快速单测；添加 `-k <name>` 可筛选模块。
-- `poetry run python scripts/manual_review.py docs/samples/pwc.json`：执行强制手动审查以补充测试记录。
-- `poetry run python src/collector/cli.py --source arxiv --dry-run`：快速验证单一采集链路。
+
+- 创建并激活虚拟环境：`python3.11 -m venv .venv && source .venv/bin/activate`
+- 安装依赖：`pip install -r requirements.txt`
+- 本地跑完整流水线：`python -m src.main`（必须在仓库根目录执行）。
+- 快速检查关键约束：`bash scripts/quick_validation.sh`
+- 代码格式化与检查：`black .`、`ruff check .`
 
 ## Coding Style & Naming Conventions
-- Python 代码遵循 PEP 8、4 空格缩进，函数/变量用 `snake_case`，类用 `PascalCase`。
-- 关键业务逻辑必须加中文注释；魔法数字统一放入 `src/common/constants.py`。
-- 采集器/服务模块尽量单一职责，最大嵌套不超过 3 层；新增脚本放入 `scripts/`，命名描述用途。
+
+- 统一使用 Python 3.11，遵循 PEP8，缩进 4 空格；函数/变量使用 `snake_case`，类使用 `PascalCase`。
+- 推荐使用 `black` + `ruff` 保持风格一致，不引入与现有风格冲突的工具。
+- 函数保持单一职责，避免超过 3 层嵌套；关键业务逻辑必须加中文注释。
+- 避免魔法数字，统一放在 `src/common/constants.py` 或配置文件中。
 
 ## Testing Guidelines
-- 单测使用 `pytest` + `pytest-asyncio`，命名为 `test_<module>_<behavior>`；夹具遵循 `fixture_<intent>`。
-- 缺少自动化覆盖的核心路径，需要在 `docs/test-report.md` 记录手动验证步骤与截图/日志链接。
-- LLM 或外部 API 相关改动，至少提供一个模拟测试（monkeypatch HTTP 响应）以避免真实请求。
+
+- 当前以手动与脚本验证为主：修改前后至少运行 `bash scripts/quick_validation.sh` 与 `python -m src.main` 做冒烟测试。
+- 如新增 `tests/` 目录，单元测试约定使用 `pytest`，命名示例：`tests/unit/test_github_collector.py`，运行：`pytest tests/unit -v`。
+- 提交前请在 PR 描述中简要说明「测试方式与结果」。
 
 ## Commit & Pull Request Guidelines
-- 采用 Conventional Commits（如 `feat: add helm collector`、`fix: patch feishu mapping`），在 body 说明动机、实现与风险。
-- PR 需包含：问题背景、变更摘要、运行命令、手动测试结果、关联 Issue/讨论链接；涉及飞书卡片或 UI 需附截图/录屏。
-- 推送前确保 `pytest`、`ruff check`、`black .`（或项目等效格式化工具）已通过，并在 PR 描述列出执行结果。
 
-## Security & Configuration Tips
-- 所有密钥放入 `.env.local` 或托管密钥管理器，配置文件仅引用变量名；严禁提交明文凭证。
-- 飞书、多源 API 受速率限制，跑批前确认 `.env.local` 中 `OPENAI_*`、`FEISHU_*`、`SEMANTIC_SCHOLAR_API_KEY` 等必填字段存在。
-- 采集器遵守目标站点 robots/使用条款；若需白名单例外，更新 `config/whitelist.yaml` 并记录审批依据。
+- 提交信息建议采用 `type(scope): summary` 样式，例如：`feat(collector): 支持新的HF任务类型`、`fix(storage): 修复SQLite同步异常`。
+- 常用 `type`：`feat`、`fix`、`refactor`、`docs`、`chore`、`revert`；摘要建议使用简洁中文。
+- PR 需包含：变更背景、主要修改点、测试方式（含关键命令）、潜在风险与回滚思路；涉及飞书或外部服务时可附上日志或截图。
+
+## Agent-Specific Instructions
+
+- 默认用简体中文回复用户，代码中的关键注释也使用中文。
+- 优先复用现有结构与工具，不破坏现有 API 兼容性；修改前先执行上述手动验证命令。

@@ -1,4 +1,5 @@
 """使用飞书API自动创建Phase 6缺失的9个字段"""
+
 import asyncio
 
 import httpx
@@ -56,7 +57,9 @@ PHASE6_FIELDS = [
 ]
 
 
-async def create_field(client: httpx.AsyncClient, access_token: str, field_def: dict) -> bool:
+async def create_field(
+    client: httpx.AsyncClient, access_token: str, field_def: dict
+) -> bool:
     """创建单个字段"""
     settings = get_settings()
 
@@ -104,7 +107,9 @@ async def main():
 
     async with httpx.AsyncClient(timeout=30) as client:
         # 获取access token
-        token_url = "https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal"
+        token_url = (
+            "https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal"
+        )
         token_resp = await client.post(
             token_url,
             json={
@@ -132,10 +137,14 @@ async def main():
     if success_count == len(results):
         print("\n✅ 所有字段创建成功!")
         print("\n下一步:")
-        print("  1. 运行 'PYTHONPATH=. uv run python scripts/verify_feishu_write.py' 验证字段")
+        print(
+            "  1. 运行 'PYTHONPATH=. uv run python scripts/verify_feishu_write.py' 验证字段"
+        )
         print("  2. 清空飞书表格旧数据")
         print("  3. 运行 'PYTHONPATH=. uv run python src/main.py' 重新写入")
-        print("  4. 运行 'PYTHONPATH=. uv run python scripts/check_feishu_fields.py' 检查完整性")
+        print(
+            "  4. 运行 'PYTHONPATH=. uv run python scripts/check_feishu_fields.py' 检查完整性"
+        )
     else:
         print("\n⚠️  部分字段创建失败,请检查:")
         for field_name, success in results:

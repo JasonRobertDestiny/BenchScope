@@ -1,4 +1,5 @@
 """GitHub Release 版本跟踪任务"""
+
 from __future__ import annotations
 
 import asyncio
@@ -38,7 +39,9 @@ async def main() -> None:
         return
 
     github_token = os.getenv("GITHUB_TOKEN")
-    tracker = GitHubReleaseTracker(db_path=str(settings.sqlite_path), github_token=github_token)
+    tracker = GitHubReleaseTracker(
+        db_path=str(settings.sqlite_path), github_token=github_token
+    )
     new_releases = await tracker.check_updates(github_urls)
 
     if not new_releases:

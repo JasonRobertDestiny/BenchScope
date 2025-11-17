@@ -9,16 +9,16 @@
 4. 写入飞书多维表格
 5. 返回友好的响应消息
 """
+
 from __future__ import annotations
 
 import asyncio
 import hashlib
-import hmac
 import json
 import logging
-from typing import Any, Dict, Optional
+from typing import Any, Dict
 
-from flask import Flask, jsonify, request
+from flask import Flask, jsonify, request  # type: ignore[import-not-found]
 
 from src.config import get_settings
 from src.storage.feishu_storage import FeishuStorage
@@ -29,7 +29,9 @@ app = Flask(__name__)
 settings = get_settings()
 
 
-def verify_feishu_signature(timestamp: str, nonce: str, signature: str, body: str) -> bool:
+def verify_feishu_signature(
+    timestamp: str, nonce: str, signature: str, body: str
+) -> bool:
     """验证飞书Webhook签名
 
     飞书签名算法:
@@ -112,7 +114,12 @@ def feishu_callback():
         candidate_url = action_value.get("candidate_url")
         user_id = data.get("open_id", "unknown")
 
-        logger.info("收到飞书回调: action=%s, url=%s, user=%s", action_type, candidate_url, user_id)
+        logger.info(
+            "收到飞书回调: action=%s, url=%s, user=%s",
+            action_type,
+            candidate_url,
+            user_id,
+        )
 
         # 5. 处理"加入候选池"操作
         if action_type == "approve" and candidate_url:
@@ -125,7 +132,10 @@ def feishu_callback():
 
     except Exception as e:
         logger.exception("飞书回调处理失败: %s", e)
-        return jsonify({"toast": {"type": "error", "content": f"处理失败: {str(e)}"}}), 500
+        return (
+            jsonify({"toast": {"type": "error", "content": f"处理失败: {str(e)}"}}),
+            500,
+        )
 
 
 async def handle_approve_candidate(candidate_url: str, user_id: str) -> Dict[str, Any]:
@@ -152,12 +162,7 @@ async def handle_approve_candidate(candidate_url: str, user_id: str) -> Dict[str
 
     if candidate_url in existing_urls:
         logger.info("URL已存在，跳过添加: %s", candidate_url)
-        return {
-            "toast": {
-                "type": "info",
-                "content": "✅ 该Benchmark已在候选池中"
-            }
-        }
+        return {"toast": {"type": "info", "content": "✅ 该Benchmark已在候选池中"}}
 
     # 2. 从飞书卡片提取的数据有限，这里需要标记为"待补充"
     # 实际使用中，应该从卡片中携带完整的ScoredCandidate数据
@@ -165,10 +170,7 @@ async def handle_approve_candidate(candidate_url: str, user_id: str) -> Dict[str
     logger.warning("新URL需要通过完整pipeline流程采集和评分")
 
     return {
-        "toast": {
-            "type": "warning",
-            "content": "⚠️ 请通过Pipeline重新采集此Benchmark"
-        }
+        "toast": {"type": "warning", "content": "⚠️ 请通过Pipeline重新采集此Benchmark"}
     }
 
 

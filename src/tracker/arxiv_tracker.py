@@ -1,4 +1,5 @@
 """arXiv 版本跟踪器"""
+
 from __future__ import annotations
 
 import asyncio
@@ -112,7 +113,9 @@ class ArxivVersionTracker:
         return None
 
     def _is_recorded(self, version: ArxivVersion) -> bool:
-        query = "SELECT 1 FROM arxiv_versions WHERE arxiv_id = ? AND version = ? LIMIT 1"
+        query = (
+            "SELECT 1 FROM arxiv_versions WHERE arxiv_id = ? AND version = ? LIMIT 1"
+        )
         with sqlite3.connect(self.db_path) as conn:
             row = conn.execute(query, (version.arxiv_id, version.version)).fetchone()
             return row is not None

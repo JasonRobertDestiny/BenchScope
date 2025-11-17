@@ -1,4 +1,5 @@
 """BenchScope Phase 2 主流程"""
+
 from __future__ import annotations
 
 import asyncio
@@ -8,12 +9,14 @@ from typing import List
 
 from src.collectors import (
     ArxivCollector,
+    DBEnginesCollector,
     GitHubCollector,
     HelmCollector,
     HuggingFaceCollector,
-    SemanticScholarCollector,
+    TechEmpowerCollector,
 )
 from src.config import Settings, get_settings
+from src.enhancer import PDFEnhancer
 from src.models import RawCandidate
 from src.notifier import FeishuNotifier
 from src.prefilter import prefilter_batch
@@ -32,13 +35,15 @@ async def main() -> None:
     logger.info("=" * 60)
 
     # Step 1: 数据采集
-    logger.info("[1/5] 数据采集...")
+    logger.info("[1/6] 数据采集...")
     collectors = [
-        ArxivCollector(),
+        ArxivCollector(settings=settings),
         # SemanticScholarCollector(),  # 暂时禁用：无API密钥
-        HelmCollector(),
-        GitHubCollector(),
+        HelmCollector(settings=settings),
+        GitHubCollector(settings=settings),
         HuggingFaceCollector(settings=settings),
+        TechEmpowerCollector(settings=settings),
+        DBEnginesCollector(settings=settings),
     ]
 
     all_candidates: List[RawCandidate] = []
@@ -56,7 +61,7 @@ async def main() -> None:
         return
 
     # Step 1.5: 去重（本次采集内部去重 + 过滤已推送的URL）
-    logger.info("[1.5/5] URL去重...")
+    logger.info("[1.5/6] URL去重...")
 
     # 1. 本次采集内部去重（保留第一次出现）
     seen_urls_this_batch: set[str] = set()
@@ -76,14 +81,16 @@ async def main() -> None:
 
     deduplicated = [c for c in internal_deduplicated if c.url not in existing_urls]
     duplicate_count = len(internal_deduplicated) - len(deduplicated)
-    logger.info("去重完成: 过滤%d条重复,保留%d条新发现\n", duplicate_count, len(deduplicated))
+    logger.info(
+        "去重完成: 过滤%d条重复,保留%d条新发现\n", duplicate_count, len(deduplicated)
+    )
 
     if not deduplicated:
         logger.warning("去重后无新候选,流程终止")
         return
 
     # Step 2: 规则预筛选
-    logger.info("[2/5] 规则预筛选...")
+    logger.info("[2/6] 规则预筛选...")
     filtered = prefilter_batch(deduplicated)
     filter_rate = 100 * (1 - len(filtered) / len(deduplicated)) if deduplicated else 0
     logger.info("预筛选完成: 保留%d条 (过滤率%.1f%%)\n", len(filtered), filter_rate)
@@ -91,21 +98,32 @@ async def main() -> None:
         logger.warning("预筛选后无候选,流程终止")
         return
 
-    # Step 3: LLM评分
-    logger.info("[3/5] LLM评分...")
+    # Step 3: PDF 内容增强（仅对通过预筛选的候选进行深度解析）
+    logger.info("[3/6] PDF内容增强...")
+    pdf_enhancer = PDFEnhancer()
+    enhanced_candidates = await pdf_enhancer.enhance_batch(filtered)
+    arxiv_count = sum(1 for c in filtered if c.source == "arxiv")
+    logger.info(
+        "PDF增强完成: %d条候选 (其中arXiv %d条)\n",
+        len(enhanced_candidates),
+        arxiv_count,
+    )
+
+    # Step 4: LLM评分（使用增强后的候选）
+    logger.info("[4/6] LLM评分...")
     async with LLMScorer() as scorer:
-        scored = await scorer.score_batch(filtered)
+        scored = await scorer.score_batch(enhanced_candidates)
     logger.info("评分完成: %d条\n", len(scored))
 
-    # Step 4: 存储入库
-    logger.info("[4/5] 存储入库...")
+    # Step 5: 存储入库
+    logger.info("[5/6] 存储入库...")
     await storage.save(scored)
     await storage.sync_from_sqlite()
     await storage.cleanup()
     logger.info("存储完成\n")
 
-    # Step 5: 飞书通知
-    logger.info("[5/5] 飞书通知...")
+    # Step 6: 飞书通知
+    logger.info("[6/6] 飞书通知...")
     notifier = FeishuNotifier(settings=settings)
     await notifier.notify(scored)
     logger.info("通知完成\n")
@@ -127,7 +145,10 @@ async def main() -> None:
 
 def _configure_logging(settings: Settings) -> None:
     log_path = Path(settings.logging.directory) / settings.logging.file_name
-    handlers = [logging.StreamHandler(), logging.FileHandler(log_path, encoding="utf-8")]
+    handlers = [
+        logging.StreamHandler(),
+        logging.FileHandler(log_path, encoding="utf-8"),
+    ]
     logging.basicConfig(
         level=settings.logging.level,
         format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",

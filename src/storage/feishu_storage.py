@@ -1,4 +1,5 @@
 """飞书多维表格存储实现"""
+
 from __future__ import annotations
 
 import asyncio
@@ -23,31 +24,34 @@ class FeishuStorage:
     """负责与飞书多维表格交互"""
 
     FIELD_MAPPING: Dict[str, str] = {
-        # 基础信息
+        # 基础信息组 (5个字段)
         "title": "标题",
         "source": "来源",
         "url": "URL",
         "abstract": "摘要",
-        # 评分维度
+        "publish_date": "发布日期",  # 修复: "开源时间" → "发布日期"
+        # 评分信息组 (8个字段)
         "activity_score": "活跃度",
         "reproducibility_score": "可复现性",
-        "license_score": "许可合规性",
-        "novelty_score": "任务新颖性",
+        "license_score": "许可合规",  # 修复: "许可合规性" → "许可合规"
+        "novelty_score": "新颖性",  # 修复: "任务新颖性" → "新颖性"
         "relevance_score": "MGX适配度",
         "total_score": "总分",
         "priority": "优先级",
         "reasoning": "评分依据",
-        "status": "状态",
-        # Phase 6 新增字段（必需，支撑"一键添加"核心目标）
-        "paper_url": "论文URL",
+        # Benchmark特征组 (8个字段)
+        "task_domain": "任务领域",
+        "metrics": "评估指标",  # 修复: "评估指标（结构化）" → "评估指标"
+        "baselines": "基准模型",
+        "institution": "机构",
+        "authors": "作者",
+        "dataset_size": "数据集规模",
+        "dataset_size_description": "数据集规模描述",
+        "dataset_url": "数据集URL",  # 新增：数据集下载链接
+        # GitHub信息组 (3个字段)
         "github_stars": "GitHub Stars",
-        "authors": "作者信息",
-        "publish_date": "开源时间",
-        "reproduction_script_url": "复现脚本链接",
-        "evaluation_metrics": "评估指标摘要",
-        "dataset_url": "数据集URL",
-        "task_type": "任务类型",
-        "license_type": "License类型",
+        "github_url": "GitHub URL",
+        "license_type": "许可证",  # 修复: "License类型" → "许可证"
     }
 
     def __init__(self, settings: Optional[Settings] = None) -> None:
@@ -75,13 +79,17 @@ class FeishuStorage:
                 if start + self.batch_size < len(candidates):
                     await asyncio.sleep(self.rate_interval)
 
-    async def _batch_create_records(self, client: httpx.AsyncClient, records: List[dict]) -> None:
+    async def _batch_create_records(
+        self, client: httpx.AsyncClient, records: List[dict]
+    ) -> None:
         url = (
             f"{self.base_url}/bitable/v1/apps/{self.settings.feishu.bitable_app_token}/"
             f"tables/{self.settings.feishu.bitable_table_id}/records/batch_create"
         )
         try:
-            resp = await client.post(url, headers=self._auth_header(), json={"records": records})
+            resp = await client.post(
+                url, headers=self._auth_header(), json={"records": records}
+            )
             resp.raise_for_status()
 
             # 检查飞书API业务错误码
@@ -101,12 +109,20 @@ class FeishuStorage:
             expected_count = len(records)
 
             if actual_count != expected_count:
-                logger.warning("飞书写入数量不匹配: 预期%s条,实际%s条", expected_count, actual_count)
+                logger.warning(
+                    "飞书写入数量不匹配: 预期%s条,实际%s条",
+                    expected_count,
+                    actual_count,
+                )
 
-            logger.info("飞书批次写入成功: %s条 (实际创建%s条)", len(records), actual_count)
+            logger.info(
+                "飞书批次写入成功: %s条 (实际创建%s条)", len(records), actual_count
+            )
 
         except httpx.HTTPStatusError as exc:
-            logger.error("飞书写入HTTP错误: %s - %s", exc.response.status_code, exc.response.text)
+            logger.error(
+                "飞书写入HTTP错误: %s - %s", exc.response.status_code, exc.response.text
+            )
             raise FeishuAPIError("批量写入失败") from exc
 
     async def _ensure_access_token(self) -> None:
@@ -159,7 +175,7 @@ class FeishuStorage:
         # 限制长度（保留完整单词）
         if len(cleaned) > max_length:
             # 截断到max_length-3为...留出空间，然后在最后一个空格处断开
-            truncated = cleaned[:max_length - 3]
+            truncated = cleaned[: max_length - 3]
             last_space = truncated.rfind(" ")
             if last_space > max_length * 0.8:  # 如果最后空格位置合理（不是太靠前）
                 cleaned = truncated[:last_space] + "..."
@@ -186,7 +202,9 @@ class FeishuStorage:
             self.FIELD_MAPPING["abstract"]: self._clean_abstract(candidate.abstract),
             # 评分维度
             self.FIELD_MAPPING["activity_score"]: candidate.activity_score,
-            self.FIELD_MAPPING["reproducibility_score"]: candidate.reproducibility_score,
+            self.FIELD_MAPPING[
+                "reproducibility_score"
+            ]: candidate.reproducibility_score,
             self.FIELD_MAPPING["license_score"]: candidate.license_score,
             self.FIELD_MAPPING["novelty_score"]: candidate.novelty_score,
             self.FIELD_MAPPING["relevance_score"]: candidate.relevance_score,
@@ -195,29 +213,14 @@ class FeishuStorage:
             self.FIELD_MAPPING["reasoning"]: (candidate.reasoning or "")[
                 : constants.FEISHU_REASONING_PREVIEW_LENGTH
             ],
-            self.FIELD_MAPPING["status"]: "pending",
         }
 
-        # 三域评分字段写入，保证缺省场景不会抛出异常
-        if hasattr(candidate, "capability_scores") and candidate.capability_scores:
-            self._inject_capability_scores(fields, candidate)
-        if hasattr(candidate, "risk_scores") and candidate.risk_scores:
-            self._inject_risk_scores(fields, candidate)
-        if hasattr(candidate, "operational_scores") and candidate.operational_scores:
-            self._inject_operational_totals(fields, candidate)
-
-        if hasattr(candidate, "risk_level") and candidate.risk_level:
-            fields[self.FIELD_MAPPING["risk_level"]] = candidate.risk_level
-
-        if hasattr(candidate, "evaluation_version"):
-            fields[self.FIELD_MAPPING["evaluation_version"]] = candidate.evaluation_version
-
-        # 新增字段 (Phase 6) - 谨慎处理空值
-        if hasattr(candidate, "paper_url") and candidate.paper_url:
-            fields[self.FIELD_MAPPING["paper_url"]] = {"link": candidate.paper_url}
-
+        # Phase 8新增字段 - 谨慎处理空值
         if hasattr(candidate, "github_stars") and candidate.github_stars is not None:
             fields[self.FIELD_MAPPING["github_stars"]] = candidate.github_stars
+
+        if hasattr(candidate, "github_url") and candidate.github_url:
+            fields[self.FIELD_MAPPING["github_url"]] = {"link": candidate.github_url}
 
         if hasattr(candidate, "authors") and candidate.authors:
             # 作者列表转换为逗号分隔字符串，限制长度
@@ -229,56 +232,42 @@ class FeishuStorage:
             timestamp_ms = int(candidate.publish_date.timestamp() * 1000)
             fields[self.FIELD_MAPPING["publish_date"]] = timestamp_ms
 
-        if hasattr(candidate, "reproduction_script_url") and candidate.reproduction_script_url:
-            fields[self.FIELD_MAPPING["reproduction_script_url"]] = {"link": candidate.reproduction_script_url}
+        if getattr(candidate, "task_domain", None):
+            # 飞书多选字段需要数组格式
+            task_domain = candidate.task_domain
+            if isinstance(task_domain, str):
+                # 如果是字符串,按逗号分割为数组
+                task_domain_list = [d.strip() for d in task_domain.split(",")]
+                fields[self.FIELD_MAPPING["task_domain"]] = task_domain_list
+            elif isinstance(task_domain, list):
+                # 如果已经是列表,直接使用
+                fields[self.FIELD_MAPPING["task_domain"]] = task_domain
 
-        if hasattr(candidate, "evaluation_metrics") and candidate.evaluation_metrics:
-            # 评估指标列表转换为逗号分隔字符串
-            metrics_str = ", ".join(candidate.evaluation_metrics)[:200]
-            fields[self.FIELD_MAPPING["evaluation_metrics"]] = metrics_str
+        if getattr(candidate, "metrics", None):
+            metrics_str = ", ".join(candidate.metrics)[:200]
+            fields[self.FIELD_MAPPING["metrics"]] = metrics_str
 
-        if hasattr(candidate, "dataset_url") and candidate.dataset_url:
-            fields[self.FIELD_MAPPING["dataset_url"]] = {"link": candidate.dataset_url}
+        if getattr(candidate, "baselines", None):
+            baselines_str = ", ".join(candidate.baselines)[:200]
+            fields[self.FIELD_MAPPING["baselines"]] = baselines_str
 
-        if hasattr(candidate, "task_type") and candidate.task_type:
-            fields[self.FIELD_MAPPING["task_type"]] = candidate.task_type
+        if getattr(candidate, "institution", None):
+            fields[self.FIELD_MAPPING["institution"]] = candidate.institution[:200]
+
+        if getattr(candidate, "dataset_size", None) is not None:
+            fields[self.FIELD_MAPPING["dataset_size"]] = candidate.dataset_size
+
+        if getattr(candidate, "dataset_size_description", None):
+            desc = candidate.dataset_size_description[:200]
+            fields[self.FIELD_MAPPING["dataset_size_description"]] = desc
 
         if hasattr(candidate, "license_type") and candidate.license_type:
             fields[self.FIELD_MAPPING["license_type"]] = candidate.license_type
 
+        if hasattr(candidate, "dataset_url") and candidate.dataset_url:
+            fields[self.FIELD_MAPPING["dataset_url"]] = {"link": candidate.dataset_url}
+
         return {"fields": fields}
-
-    def _inject_capability_scores(self, fields: dict, candidate: ScoredCandidate) -> None:
-        """写入能力域得分，保留两位小数"""
-
-        scores = candidate.capability_scores
-        if not scores:
-            return
-
-        fields[self.FIELD_MAPPING["planning_score"]] = round(scores.planning_score, 2)
-        fields[self.FIELD_MAPPING["tool_use_score"]] = round(scores.tool_use_score, 2)
-        fields[self.FIELD_MAPPING["memory_score"]] = round(scores.memory_score, 2)
-        fields[self.FIELD_MAPPING["collaboration_score"]] = round(scores.collaboration_score, 2)
-        fields[self.FIELD_MAPPING["reasoning_score"]] = round(scores.reasoning_score, 2)
-        fields[self.FIELD_MAPPING["capability_total"]] = round(candidate.capability_total, 2)
-
-    def _inject_risk_scores(self, fields: dict, candidate: ScoredCandidate) -> None:
-        """写入风险域得分，方便在表格快速筛选风险"""
-
-        scores = candidate.risk_scores
-        if not scores:
-            return
-
-        fields[self.FIELD_MAPPING["security_score"]] = round(scores.security_score, 2)
-        fields[self.FIELD_MAPPING["robustness_score"]] = round(scores.robustness_score, 2)
-        fields[self.FIELD_MAPPING["hallucination_risk"]] = round(scores.hallucination_risk, 2)
-        fields[self.FIELD_MAPPING["compliance_score"]] = round(scores.compliance_score, 2)
-        fields[self.FIELD_MAPPING["risk_total"]] = round(candidate.risk_total, 2)
-
-    def _inject_operational_totals(self, fields: dict, candidate: ScoredCandidate) -> None:
-        """写入运营域总分，沿用旧5维细项"""
-
-        fields[self.FIELD_MAPPING["operational_total"]] = round(candidate.operational_total, 2)
 
     async def get_existing_urls(self) -> set[str]:
         """查询飞书Bitable已存在的所有URL（用于去重）"""

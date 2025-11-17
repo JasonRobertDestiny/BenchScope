@@ -1,4 +1,5 @@
 """SQLite 降级存储"""
+
 from __future__ import annotations
 
 import asyncio
@@ -91,6 +92,8 @@ class SQLiteFallback:
         for score_json, raw_json in cursor.fetchall():
             score_dict = json.loads(score_json)
             raw_dict = json.loads(raw_json)
+            if "score_reasoning" not in score_dict:
+                score_dict["score_reasoning"] = score_dict.pop("reasoning", "")
             candidate_data = self._deserialize_raw(raw_dict)
             candidate = ScoredCandidate(**candidate_data, **score_dict)
             results.append(candidate)
@@ -112,7 +115,9 @@ class SQLiteFallback:
         conn.commit()
         conn.close()
 
-    async def cleanup_old_records(self, days: int = constants.SQLITE_RETENTION_DAYS) -> None:
+    async def cleanup_old_records(
+        self, days: int = constants.SQLITE_RETENTION_DAYS
+    ) -> None:
         """清理已同步且超过指定天数的记录"""
 
         await asyncio.to_thread(self._cleanup_sync, days)
@@ -135,11 +140,18 @@ class SQLiteFallback:
             "source": candidate.source,
             "abstract": candidate.abstract,
             "authors": candidate.authors,
-            "publish_date": candidate.publish_date.isoformat() if candidate.publish_date else None,
+            "publish_date": (
+                candidate.publish_date.isoformat() if candidate.publish_date else None
+            ),
             "github_stars": candidate.github_stars,
             "github_url": candidate.github_url,
             "dataset_url": candidate.dataset_url,
             "raw_metadata": candidate.raw_metadata,
+            "raw_metrics": candidate.raw_metrics,
+            "raw_baselines": candidate.raw_baselines,
+            "raw_authors": candidate.raw_authors,
+            "raw_institutions": candidate.raw_institutions,
+            "raw_dataset_size": candidate.raw_dataset_size,
         }
 
     @staticmethod
@@ -150,7 +162,14 @@ class SQLiteFallback:
             "license_score": candidate.license_score,
             "novelty_score": candidate.novelty_score,
             "relevance_score": candidate.relevance_score,
-            "reasoning": candidate.reasoning,
+            "score_reasoning": candidate.score_reasoning,
+            "custom_total_score": candidate.custom_total_score,
+            "task_domain": candidate.task_domain,
+            "metrics": candidate.metrics,
+            "baselines": candidate.baselines,
+            "institution": candidate.institution,
+            "dataset_size": candidate.dataset_size,
+            "dataset_size_description": candidate.dataset_size_description,
         }
 
     @staticmethod

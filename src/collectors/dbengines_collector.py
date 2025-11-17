@@ -1,0 +1,118 @@
+"""DB-Engines 数据库排名采集器"""
+
+from __future__ import annotations
+
+import logging
+from typing import Any, Dict, List, Optional
+
+import httpx
+from bs4 import BeautifulSoup
+
+from src.common import constants
+from src.config import Settings, get_settings
+from src.models import RawCandidate
+
+logger = logging.getLogger(__name__)
+
+
+class DBEnginesCollector:
+    """抓取 DB-Engines 排名,产出数据库性能相关候选"""
+
+    def __init__(self, settings: Optional[Settings] = None) -> None:
+        self.settings = settings or get_settings()
+        cfg = self.settings.sources.dbengines
+        self.enabled = cfg.enabled
+        self.base_url = cfg.base_url or constants.DBENGINES_BASE_URL
+        self.timeout = cfg.timeout_seconds
+        self.max_results = cfg.max_results
+
+    async def collect(self) -> List[RawCandidate]:
+        """采集候选列表"""
+
+        if not self.enabled:
+            logger.info("DB-Engines采集器已禁用,跳过")
+            return []
+
+        try:
+            async with httpx.AsyncClient(timeout=self.timeout) as client:
+                resp = await client.get(f"{self.base_url}/ranking")
+                resp.raise_for_status()
+        except httpx.TimeoutException:
+            logger.error("DB-Engines请求超时(>%ss)", self.timeout)
+            return []
+        except httpx.HTTPError as exc:
+            logger.error("DB-Engines请求失败: %s", exc)
+            return []
+        except Exception as exc:  # noqa: BLE001
+            logger.error("DB-Engines采集异常: %s", exc, exc_info=True)
+            return []
+
+        soup = BeautifulSoup(resp.text, "html.parser")
+        rows = soup.select("table.dbi tbody tr")
+        if not rows:
+            logger.warning("DB-Engines页面结构变化,未找到排名表")
+            return []
+
+        candidates: List[RawCandidate] = []
+        for idx, row in enumerate(rows[: self.max_results]):
+            candidate = self._parse_row(row, idx)
+            if candidate:
+                candidates.append(candidate)
+
+        logger.info("DB-Engines采集完成,有效候选%d条", len(candidates))
+        return candidates
+
+    def _parse_row(self, row: Any, idx: int) -> Optional[RawCandidate]:
+        """解析单行排名数据"""
+
+        try:
+            rank_cell = row.select_one("td:nth-child(1)")
+            name_cell = row.select_one("td:nth-child(2) a")
+            type_cell = row.select_one("td:nth-child(3)")
+            score_cell = row.select_one("td:nth-child(4)")
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("解析DB-Engines第%s行失败: %s", idx + 1, exc)
+            return None
+
+        if not all([rank_cell, name_cell, type_cell, score_cell]):
+            return None
+
+        rank_text = (rank_cell.text or "").strip()
+        db_name = (name_cell.text or "").strip()
+        db_type = (type_cell.text or "").strip()
+        score_text = (score_cell.text or "").strip()
+        detail_href = name_cell.get("href", "")
+        detail_url = self._normalize_url(detail_href)
+
+        description = (
+            f"DB-Engines 排名第 {rank_text} 名的 {db_type} 数据库 {db_name}。\n"
+            f"流行度评分: {score_text}。查看详情可获取性能评测、技术资料与使用案例。"
+        )
+
+        raw_metadata = {
+            "database": db_name,
+            "type": db_type,
+            "ranking_score": score_text,
+            "rank": rank_text,
+            "detail_url": detail_url,
+        }
+
+        return RawCandidate(
+            title=f"DB-Engines - {db_name} Benchmark",
+            url=detail_url or f"{self.base_url}/ranking",
+            source="dbengines",
+            abstract=description,
+            raw_metadata=raw_metadata,
+        )
+
+    def _normalize_url(self, href: str) -> str:
+        """将相对路径转换为完整URL"""
+
+        if not href:
+            return f"{self.base_url}/ranking"
+        if href.startswith("http://") or href.startswith("https://"):
+            return href
+        if not href.startswith("/"):
+            return f"{self.base_url}/{href}"
+        base = self.base_url.rstrip("/")
+        return f"{base}{href}"

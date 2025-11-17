@@ -1,4 +1,5 @@
 """核心数据模型定义"""
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -14,6 +15,8 @@ SourceType = Literal[
     "huggingface",
     "semantic_scholar",
     "helm",
+    "techempower",
+    "dbengines",
 ]
 
 
@@ -30,6 +33,13 @@ class RawCandidate:
     github_stars: Optional[int] = None
     github_url: Optional[str] = None
     dataset_url: Optional[str] = None
+    # Phase 8新增：采集阶段粗提取的元数据
+    raw_metrics: Optional[List[str]] = None  # 原始指标文本
+    raw_baselines: Optional[List[str]] = None  # 原始baseline文本
+    raw_authors: Optional[str] = None  # 原始作者字符串
+    raw_institutions: Optional[str] = None  # 原始机构字符串
+    raw_dataset_size: Optional[str] = None  # 原始数据规模描述
+
     raw_metadata: Dict[str, str] = field(default_factory=dict)
 
     # Phase 6 新增字段（从采集器直接提取）
@@ -55,6 +65,11 @@ class ScoredCandidate:
     github_url: Optional[str] = None
     dataset_url: Optional[str] = None
     raw_metadata: Dict[str, str] = field(default_factory=dict)
+    raw_metrics: Optional[List[str]] = None
+    raw_baselines: Optional[List[str]] = None
+    raw_authors: Optional[str] = None
+    raw_institutions: Optional[str] = None
+    raw_dataset_size: Optional[str] = None
 
     # Phase 2评分字段
     activity_score: float = 0.0  # 活跃度 (25%)
@@ -62,18 +77,42 @@ class ScoredCandidate:
     license_score: float = 0.0  # 许可合规 (20%)
     novelty_score: float = 0.0  # 新颖性 (15%)
     relevance_score: float = 0.0  # MGX适配度 (10%)
-    reasoning: str = ""
+    score_reasoning: str = ""
+    custom_total_score: Optional[float] = None  # 后端专项评分可覆盖总分
 
     # Phase 6 新增字段
     paper_url: Optional[str] = None  # 论文URL (独立于GitHub URL)
     reproduction_script_url: Optional[str] = None  # 复现脚本URL
-    evaluation_metrics: Optional[List[str]] = None  # 评估指标列表 (如["Accuracy", "F1"])
+    evaluation_metrics: Optional[List[str]] = (
+        None  # 评估指标列表 (如["Accuracy", "F1"])
+    )
     task_type: Optional[str] = None  # 任务类型 (如"Code Generation", "QA")
     license_type: Optional[str] = None  # 具体License类型 (如"MIT", "Apache-2.0")
+
+    # Phase 8新增：LLM抽取字段
+    task_domain: Optional[str] = None
+    metrics: Optional[List[str]] = None
+    baselines: Optional[List[str]] = None
+    institution: Optional[str] = None
+    dataset_size: Optional[int] = None
+    dataset_size_description: Optional[str] = None
+
+    @property
+    def reasoning(self) -> str:
+        """兼容旧字段命名"""
+
+        return self.score_reasoning
+
+    @reasoning.setter
+    def reasoning(self, value: str) -> None:
+        self.score_reasoning = value
 
     @property
     def total_score(self) -> float:
         """加权总分(0-10)"""
+
+        if self.custom_total_score is not None:
+            return self.custom_total_score
 
         weights = constants.SCORE_WEIGHTS
         return (

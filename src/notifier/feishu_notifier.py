@@ -1,4 +1,5 @@
 """飞书Webhook通知"""
+
 from __future__ import annotations
 
 import asyncio
@@ -22,7 +23,9 @@ logger = logging.getLogger(__name__)
 class FeishuNotifier:
     """飞书Webhook卡片通知"""
 
-    def __init__(self, webhook_url: Optional[str] = None, settings: Optional[Settings] = None) -> None:
+    def __init__(
+        self, webhook_url: Optional[str] = None, settings: Optional[Settings] = None
+    ) -> None:
         self.settings = settings or get_settings()
         self.webhook_url = webhook_url or self.settings.feishu.webhook_url
 
@@ -36,7 +39,9 @@ class FeishuNotifier:
             logger.info("无候选需要通知")
             return
 
-        qualified = [c for c in candidates if c.total_score >= constants.MIN_TOTAL_SCORE]
+        qualified = [
+            c for c in candidates if c.total_score >= constants.MIN_TOTAL_SCORE
+        ]
         if not qualified:
             logger.info("无高分候选,跳过通知")
             return
@@ -56,7 +61,9 @@ class FeishuNotifier:
             await asyncio.sleep(constants.FEISHU_RATE_LIMIT_DELAY)
 
         # 3. 推送统计摘要卡片 (支持markdown)
-        summary_card = self._build_summary_card(qualified, high_priority, medium_priority)
+        summary_card = self._build_summary_card(
+            qualified, high_priority, medium_priority
+        )
         await self._send_webhook(summary_card)
 
         # 4. 日志记录推送统计
@@ -89,10 +96,14 @@ class FeishuNotifier:
         normalized = fallback.lower()
         return constants.FEISHU_SOURCE_NAME_MAP.get(normalized, fallback.title())
 
-    async def _send_medium_priority_summary(self, candidates: List[ScoredCandidate]) -> None:
+    async def _send_medium_priority_summary(
+        self, candidates: List[ScoredCandidate]
+    ) -> None:
         """发送中优先级候选摘要卡片 - 专业排版版"""
         top_limit = constants.FEISHU_MEDIUM_TOPK
-        top_candidates = sorted(candidates, key=lambda x: x.total_score, reverse=True)[:top_limit]
+        top_candidates = sorted(candidates, key=lambda x: x.total_score, reverse=True)[
+            :top_limit
+        ]
         avg_medium_score = sum(c.total_score for c in candidates) / len(candidates)
 
         # 计算分数范围
@@ -108,7 +119,11 @@ class FeishuNotifier:
         )
 
         for i, c in enumerate(top_candidates, 1):
-            title = c.title[:constants.TITLE_TRUNCATE_MEDIUM] + "..." if len(c.title) > constants.TITLE_TRUNCATE_MEDIUM else c.title
+            title = (
+                c.title[: constants.TITLE_TRUNCATE_MEDIUM] + "..."
+                if len(c.title) > constants.TITLE_TRUNCATE_MEDIUM
+                else c.title
+            )
             source_name = self._format_source_name(c.source)
 
             content += (
@@ -136,7 +151,10 @@ class FeishuNotifier:
                         "actions": [
                             {
                                 "tag": "button",
-                                "text": {"content": "查看完整表格", "tag": "plain_text"},
+                                "text": {
+                                    "content": "查看完整表格",
+                                    "tag": "plain_text",
+                                },
                                 "url": constants.FEISHU_BENCH_TABLE_URL,
                                 "type": "primary",
                             }
@@ -212,27 +230,27 @@ class FeishuNotifier:
                 },
                 "elements": [
                     {"tag": "div", "text": {"tag": "lark_md", "content": content}},
-                    {
-                        "tag": "hr"
-                    },
+                    {"tag": "hr"},
                     {
                         "tag": "note",
                         "elements": [
                             {
                                 "tag": "plain_text",
-                                "content": f"BenchScope 自动推送  │  数据已同步至飞书表格  │  下次采集: 明日 09:00"
+                                "content": "BenchScope 自动推送  │  数据已同步至飞书表格  │  下次采集: 明日 09:00",
                             }
-                        ]
-                    }
+                        ],
+                    },
                 ],
             },
         }
 
     def _build_card(self, title: str, candidate: ScoredCandidate) -> dict:
         """构建高优先级候选卡片 - 专业简洁版"""
-        priority_label = {"high": "高优先级", "medium": "中优先级", "low": "低优先级"}.get(
-            candidate.priority, "低优先级"
-        )
+        priority_label = {
+            "high": "高优先级",
+            "medium": "中优先级",
+            "low": "低优先级",
+        }.get(candidate.priority, "低优先级")
 
         source_name = self._format_source_name(candidate.source)
 
@@ -313,10 +331,15 @@ class FeishuNotifier:
         # 如果配置了webhook_secret，添加签名
         if self.settings.feishu.webhook_secret:
             timestamp = int(time.time())
-            sign = self._generate_signature(timestamp, self.settings.feishu.webhook_secret)
+            sign = self._generate_signature(
+                timestamp, self.settings.feishu.webhook_secret
+            )
             payload["timestamp"] = str(timestamp)
             payload["sign"] = sign
             logger.debug("Webhook签名已添加: timestamp=%s", timestamp)
+
+        if not self.webhook_url:
+            raise RuntimeError("未配置飞书Webhook URL，无法发送通知")
 
         async with httpx.AsyncClient(timeout=constants.HTTP_CLIENT_TIMEOUT) as client:
             resp = await client.post(self.webhook_url, json=payload)
@@ -341,7 +364,6 @@ class FeishuNotifier:
         """
         string_to_sign = f"{timestamp}\n{secret}"
         hmac_code = hmac.new(
-            string_to_sign.encode("utf-8"),
-            digestmod=hashlib.sha256
+            string_to_sign.encode("utf-8"), digestmod=hashlib.sha256
         ).digest()
-        return base64.b64encode(hmac_code).decode('utf-8')
+        return base64.b64encode(hmac_code).decode("utf-8")

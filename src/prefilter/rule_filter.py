@@ -1,4 +1,5 @@
 """规则预筛选引擎"""
+
 from __future__ import annotations
 
 import logging
@@ -14,13 +15,19 @@ logger = logging.getLogger(__name__)
 def prefilter(candidate: RawCandidate) -> bool:
     """Phase 3 基线预筛选规则"""
 
-    if not candidate.title or len(candidate.title.strip()) < constants.PREFILTER_MIN_TITLE_LENGTH:
+    if (
+        not candidate.title
+        or len(candidate.title.strip()) < constants.PREFILTER_MIN_TITLE_LENGTH
+    ):
         logger.debug("过滤: 标题过短 - %s", candidate.title)
         return False
 
     # 摘要长度要求：HuggingFace/HELM/Semantic Scholar来源豁免（官方数据源，描述本身较短）
     if candidate.source not in {"helm", "semantic_scholar", "huggingface"}:
-        if not candidate.abstract or len(candidate.abstract.strip()) < constants.PREFILTER_MIN_ABSTRACT_LENGTH:
+        if (
+            not candidate.abstract
+            or len(candidate.abstract.strip()) < constants.PREFILTER_MIN_ABSTRACT_LENGTH
+        ):
             logger.debug("过滤: 摘要过短 - %s", candidate.title)
             return False
 
@@ -33,18 +40,13 @@ def prefilter(candidate: RawCandidate) -> bool:
         logger.debug("过滤: 来源不在白名单 - %s", candidate.source)
         return False
 
-    # 关键词检查：HELM/Semantic Scholar来源豁免（本身就是Benchmark榜单/学术论文源）
-    if candidate.source not in {"helm", "semantic_scholar"}:
-        text = f"{candidate.title} {candidate.abstract}".lower()
-        matched = [kw for kw in constants.BENCHMARK_KEYWORDS if kw in text]
-        if not matched:
-            logger.debug("过滤: 无关键词命中 - %s", candidate.title)
-            return False
+    if not _passes_keyword_rules(candidate):
+        return False
 
     if candidate.source == "github" and not _is_quality_github_repo(candidate):
         return False
 
-    logger.debug("通过: %s", candidate.title[:constants.TITLE_TRUNCATE_SHORT])
+    logger.debug("通过: %s", candidate.title[: constants.TITLE_TRUNCATE_SHORT])
     return True
 
 
@@ -118,10 +120,28 @@ def _is_quality_github_repo(candidate: RawCandidate) -> bool:
         "leaderboard",
         "baseline",
     ]
-    has_benchmark_feature = any(feature in readme_lower for feature in benchmark_features)
+    has_benchmark_feature = any(
+        feature in readme_lower for feature in benchmark_features
+    )
 
     if not has_benchmark_feature:
         logger.debug("缺少Benchmark特征: %s", candidate.title)
+        return False
+
+    return True
+
+
+def _passes_keyword_rules(candidate: RawCandidate) -> bool:
+    """基于Phase7白/黑名单的关键词过滤"""
+
+    text = f"{candidate.title} {(candidate.abstract or '')}".lower()
+
+    if any(excluded in text for excluded in constants.PREFILTER_EXCLUDED_KEYWORDS):
+        logger.debug("过滤: 命中排除关键词 - %s", candidate.title)
+        return False
+
+    if not any(required in text for required in constants.PREFILTER_REQUIRED_KEYWORDS):
+        logger.debug("过滤: 未命中必需关键词 - %s", candidate.title)
         return False
 
     return True

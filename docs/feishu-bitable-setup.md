@@ -11,8 +11,11 @@
 2. **独立多维表格Bitable** (URL路径 `/base/`) - ✅ 支持OpenAPI
 3. **云文档表格** - ❌ 不支持OpenAPI
 
-当前URL: `https://jcnqgpxcjdms.feishu.cn/wiki/NJkswt2hKi1pW0kCsdSccIoanmf?table=tbl53JhkakSOP4wo`
+当前URL (旧Wiki表格): `https://jcnqgpxcjdms.feishu.cn/wiki/NJkswt2hKi1pW0kCsdSccIoanmf?table=tbl53JhkakSOP4wo`
 - 路径是 `/wiki/` → 这是Wiki表格，无法通过API访问
+
+**已修正为独立Bitable**: `https://deepwisdom.feishu.cn/base/SbIibGBIWayQncslz5kcYMnrnGf?table=tblG5cMwubU6AJcV&view=vewUfT4GO6`
+- 路径是 `/base/` → 独立Bitable，可通过API访问 ✅
 
 需要: `https://xxx.feishu.cn/base/{app_token}?table={table_id}`
 - 路径是 `/base/` → 独立Bitable，可通过API访问

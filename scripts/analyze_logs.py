@@ -1,4 +1,5 @@
 """BenchScope 日志分析工具"""
+
 from __future__ import annotations
 
 import argparse
@@ -9,10 +10,12 @@ from pathlib import Path
 
 COLLECTOR_PATTERNS = {
     "arxiv": re.compile(r"arXiv采集完成,有效候选(?P<count>\d+)条"),
-    "github": re.compile(r"GitHub采集完成,候选总数(?P<count>\d+)")
+    "github": re.compile(r"GitHub采集完成,候选总数(?P<count>\d+)"),
 }
 
-PREFILTER_PATTERN = re.compile(r"预筛选完成: 保留(?P<kept>\d+)条 \(过滤率(?P<rate>[0-9.]+)%\)")
+PREFILTER_PATTERN = re.compile(
+    r"预筛选完成: 保留(?P<kept>\d+)条 \(过滤率(?P<rate>[0-9.]+)%\)"
+)
 SCORE_PATTERN = re.compile(r"评分完成: (?P<count>\d+)条")
 ERROR_PATTERN = re.compile(r"\[ERROR\]|ERROR")
 
@@ -39,17 +42,26 @@ def parse_log_file(path: Path) -> LogStats:
                 if match:
                     collectors[name] += int(match.group("count"))
             if "HuggingFace采集完成" in line:
-                count = int(re.findall(r"候选数(\d+)", line)[0]) if re.findall(r"候选数(\d+)", line) else 0
+                count = (
+                    int(re.findall(r"候选数(\d+)", line)[0])
+                    if re.findall(r"候选数(\d+)", line)
+                    else 0
+                )
                 collectors["huggingface"] += count
             pre_match = PREFILTER_PATTERN.search(line)
             if pre_match:
-                prefilter_stats = (int(pre_match.group("kept")), float(pre_match.group("rate")))
+                prefilter_stats = (
+                    int(pre_match.group("kept")),
+                    float(pre_match.group("rate")),
+                )
             score_match = SCORE_PATTERN.search(line)
             if score_match:
                 scored = int(score_match.group("count"))
             if ERROR_PATTERN.search(line):
                 errors.append(line)
-    return LogStats(collectors=collectors, prefilter=prefilter_stats, scored=scored, errors=errors)
+    return LogStats(
+        collectors=collectors, prefilter=prefilter_stats, scored=scored, errors=errors
+    )
 
 
 def generate_report(stats: LogStats) -> str:

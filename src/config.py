@@ -1,10 +1,10 @@
 """全局配置加载逻辑"""
+
 from __future__ import annotations
 
 import logging
 import os
 from dataclasses import dataclass, field
-from functools import lru_cache
 from pathlib import Path
 from typing import Optional
 
@@ -47,19 +47,93 @@ class LoggingSettings:
 
 
 @dataclass(slots=True)
+class ArxivSourceSettings:
+    enabled: bool = True
+    max_results: int = constants.ARXIV_MAX_RESULTS
+    lookback_hours: int = constants.ARXIV_LOOKBACK_HOURS
+    timeout_seconds: int = constants.ARXIV_TIMEOUT_SECONDS
+    max_retries: int = constants.ARXIV_MAX_RETRIES
+    keywords: list[str] = field(default_factory=lambda: constants.ARXIV_KEYWORDS.copy())
+    categories: list[str] = field(
+        default_factory=lambda: constants.ARXIV_CATEGORIES.copy()
+    )
+
+
+@dataclass(slots=True)
+class HelmSourceSettings:
+    enabled: bool = True
+    base_url: str = constants.HELM_BASE_PAGE
+    storage_base: str = constants.HELM_STORAGE_BASE
+    default_release: str = constants.HELM_DEFAULT_RELEASE
+    timeout_seconds: int = constants.HELM_TIMEOUT_SECONDS
+    allowed_scenarios: list[str] = field(
+        default_factory=lambda: constants.HELM_ALLOWED_SCENARIOS.copy()
+    )
+    excluded_scenarios: list[str] = field(
+        default_factory=lambda: constants.HELM_EXCLUDED_SCENARIOS.copy()
+    )
+
+
+@dataclass(slots=True)
+class GitHubSourceSettings:
+    enabled: bool = True
+    topics: list[str] = field(default_factory=lambda: constants.GITHUB_TOPICS.copy())
+    languages: list[str] = field(
+        default_factory=lambda: constants.GITHUB_LANGUAGES.copy()
+    )
+    search_api: str = constants.GITHUB_SEARCH_API
+    trending_url: str = constants.GITHUB_TRENDING_URL
+    min_stars: int = constants.GITHUB_MIN_STARS
+    lookback_days: int = constants.GITHUB_LOOKBACK_DAYS
+    timeout_seconds: int = constants.GITHUB_TIMEOUT_SECONDS
+    token: Optional[str] = None
+    min_readme_length: int = constants.GITHUB_MIN_README_LENGTH
+    max_days_since_update: int = constants.GITHUB_MAX_DAYS_SINCE_UPDATE
+
+
+@dataclass(slots=True)
 class HuggingFaceSourceSettings:
-    keywords: list[str] = field(default_factory=lambda: constants.HUGGINGFACE_KEYWORDS.copy())
+    enabled: bool = True
+    keywords: list[str] = field(
+        default_factory=lambda: constants.HUGGINGFACE_KEYWORDS.copy()
+    )
     task_categories: list[str] = field(
         default_factory=lambda: constants.HUGGINGFACE_TASK_CATEGORIES.copy()
     )
     min_downloads: int = constants.HUGGINGFACE_MIN_DOWNLOADS
     limit: int = constants.HUGGINGFACE_MAX_RESULTS
+    lookback_days: int = constants.HUGGINGFACE_LOOKBACK_DAYS
+
+
+@dataclass(slots=True)
+class TechEmpowerSourceSettings:
+    enabled: bool = True
+    base_url: str = constants.TECHEMPOWER_BASE_URL
+    timeout_seconds: int = constants.TECHEMPOWER_TIMEOUT_SECONDS
+    min_composite_score: float = constants.TECHEMPOWER_MIN_COMPOSITE_SCORE
+
+
+@dataclass(slots=True)
+class DBEnginesSourceSettings:
+    enabled: bool = True
+    base_url: str = constants.DBENGINES_BASE_URL
+    timeout_seconds: int = constants.DBENGINES_TIMEOUT_SECONDS
+    max_results: int = constants.DBENGINES_MAX_RESULTS
 
 
 @dataclass(slots=True)
 class SourcesSettings:
+    arxiv: ArxivSourceSettings = field(default_factory=ArxivSourceSettings)
+    helm: HelmSourceSettings = field(default_factory=HelmSourceSettings)
+    github: GitHubSourceSettings = field(default_factory=GitHubSourceSettings)
     huggingface: HuggingFaceSourceSettings = field(
         default_factory=HuggingFaceSourceSettings
+    )
+    techempower: TechEmpowerSourceSettings = field(
+        default_factory=TechEmpowerSourceSettings
+    )
+    dbengines: DBEnginesSourceSettings = field(
+        default_factory=DBEnginesSourceSettings
     )
 
 
@@ -128,19 +202,141 @@ def _load_sources_settings(path: Path) -> SourcesSettings:
         logging.getLogger(__name__).warning("加载sources.yaml失败: %s", exc)
         return SourcesSettings()
 
+    arxiv_cfg = data.get("arxiv", {})
+    helm_cfg = data.get("helm", {})
+    github_cfg = data.get("github", {})
     huggingface_cfg = data.get("huggingface", {})
+    techempower_cfg = data.get("techempower", {})
+    dbengines_cfg = data.get("dbengines", {})
     return SourcesSettings(
+        arxiv=ArxivSourceSettings(
+            enabled=bool(arxiv_cfg.get("enabled", True)),
+            max_results=int(arxiv_cfg.get("max_results", constants.ARXIV_MAX_RESULTS)),
+            lookback_hours=int(
+                arxiv_cfg.get("lookback_hours", constants.ARXIV_LOOKBACK_HOURS)
+            ),
+            timeout_seconds=int(
+                arxiv_cfg.get("timeout_seconds", constants.ARXIV_TIMEOUT_SECONDS)
+            ),
+            max_retries=int(arxiv_cfg.get("max_retries", constants.ARXIV_MAX_RETRIES)),
+            keywords=_ensure_list(arxiv_cfg.get("keywords"), constants.ARXIV_KEYWORDS),
+            categories=_ensure_list(
+                arxiv_cfg.get("categories"), constants.ARXIV_CATEGORIES
+            ),
+        ),
+        helm=HelmSourceSettings(
+            enabled=bool(helm_cfg.get("enabled", True)),
+            base_url=helm_cfg.get("base_url", constants.HELM_BASE_PAGE),
+            storage_base=helm_cfg.get("storage_base", constants.HELM_STORAGE_BASE),
+            default_release=helm_cfg.get(
+                "default_release", constants.HELM_DEFAULT_RELEASE
+            ),
+            timeout_seconds=int(
+                helm_cfg.get("timeout_seconds", constants.HELM_TIMEOUT_SECONDS)
+            ),
+            allowed_scenarios=_ensure_list(
+                helm_cfg.get("allowed_scenarios"), constants.HELM_ALLOWED_SCENARIOS
+            ),
+            excluded_scenarios=_ensure_list(
+                helm_cfg.get("excluded_scenarios"), constants.HELM_EXCLUDED_SCENARIOS
+            ),
+        ),
+        github=GitHubSourceSettings(
+            enabled=bool(github_cfg.get("enabled", True)),
+            topics=_ensure_list(github_cfg.get("topics"), constants.GITHUB_TOPICS),
+            languages=_ensure_list(
+                github_cfg.get("languages"), constants.GITHUB_LANGUAGES
+            ),
+            search_api=github_cfg.get("search_api", constants.GITHUB_SEARCH_API),
+            trending_url=github_cfg.get("trending_url", constants.GITHUB_TRENDING_URL),
+            min_stars=int(github_cfg.get("min_stars", constants.GITHUB_MIN_STARS)),
+            lookback_days=int(
+                github_cfg.get("lookback_days", constants.GITHUB_LOOKBACK_DAYS)
+            ),
+            timeout_seconds=int(
+                github_cfg.get("timeout_seconds", constants.GITHUB_TIMEOUT_SECONDS)
+            ),
+            token=_resolve_env_placeholder(github_cfg.get("token"))
+            or os.getenv("GITHUB_TOKEN"),
+            min_readme_length=int(
+                github_cfg.get("min_readme_length", constants.GITHUB_MIN_README_LENGTH)
+            ),
+            max_days_since_update=int(
+                github_cfg.get(
+                    "max_days_since_update", constants.GITHUB_MAX_DAYS_SINCE_UPDATE
+                )
+            ),
+        ),
         huggingface=HuggingFaceSourceSettings(
+            enabled=bool(huggingface_cfg.get("enabled", True)),
             keywords=huggingface_cfg.get("keywords")
             or constants.HUGGINGFACE_KEYWORDS.copy(),
             task_categories=huggingface_cfg.get("task_categories")
             or constants.HUGGINGFACE_TASK_CATEGORIES.copy(),
             min_downloads=int(
-                huggingface_cfg.get("min_downloads", constants.HUGGINGFACE_MIN_DOWNLOADS)
+                huggingface_cfg.get(
+                    "min_downloads", constants.HUGGINGFACE_MIN_DOWNLOADS
+                )
             ),
-            limit=int(huggingface_cfg.get("limit", constants.HUGGINGFACE_MAX_RESULTS)),
-        )
+            limit=int(
+                huggingface_cfg.get(
+                    "max_results",
+                    huggingface_cfg.get("limit", constants.HUGGINGFACE_MAX_RESULTS),
+                )
+            ),
+            lookback_days=int(
+                huggingface_cfg.get(
+                    "lookback_days", constants.HUGGINGFACE_LOOKBACK_DAYS
+                )
+            ),
+        ),
+        techempower=TechEmpowerSourceSettings(
+            enabled=bool(techempower_cfg.get("enabled", True)),
+            base_url=techempower_cfg.get(
+                "base_url", constants.TECHEMPOWER_BASE_URL
+            ),
+            timeout_seconds=int(
+                techempower_cfg.get(
+                    "timeout_seconds", constants.TECHEMPOWER_TIMEOUT_SECONDS
+                )
+            ),
+            min_composite_score=float(
+                techempower_cfg.get(
+                    "min_composite_score",
+                    constants.TECHEMPOWER_MIN_COMPOSITE_SCORE,
+                )
+            ),
+        ),
+        dbengines=DBEnginesSourceSettings(
+            enabled=bool(dbengines_cfg.get("enabled", True)),
+            base_url=dbengines_cfg.get(
+                "base_url", constants.DBENGINES_BASE_URL
+            ),
+            timeout_seconds=int(
+                dbengines_cfg.get(
+                    "timeout_seconds", constants.DBENGINES_TIMEOUT_SECONDS
+                )
+            ),
+            max_results=int(
+                dbengines_cfg.get("max_results", constants.DBENGINES_MAX_RESULTS)
+            ),
+        ),
     )
+
+
+def _ensure_list(value: object, fallback: list[str]) -> list[str]:
+    if isinstance(value, list) and value:
+        return [str(item) for item in value]
+    return fallback.copy()
+
+
+def _resolve_env_placeholder(raw: Optional[str]) -> Optional[str]:
+    if not raw:
+        return None
+    if raw.startswith("${") and raw.endswith("}"):
+        env_key = raw[2:-1]
+        return os.getenv(env_key)
+    return raw
 
 
 __all__ = ["get_settings", "Settings"]

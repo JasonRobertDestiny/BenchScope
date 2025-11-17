@@ -1,4 +1,5 @@
 """存储管理器"""
+
 from __future__ import annotations
 
 import logging
@@ -15,7 +16,11 @@ logger = logging.getLogger(__name__)
 class StorageManager:
     """飞书主存储 + SQLite 降级"""
 
-    def __init__(self, feishu: Optional[FeishuStorage] = None, sqlite: Optional[SQLiteFallback] = None) -> None:
+    def __init__(
+        self,
+        feishu: Optional[FeishuStorage] = None,
+        sqlite: Optional[SQLiteFallback] = None,
+    ) -> None:
         self.feishu = feishu or FeishuStorage()
         self.sqlite = sqlite or SQLiteFallback()
 

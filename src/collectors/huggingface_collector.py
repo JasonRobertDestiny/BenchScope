@@ -1,4 +1,5 @@
 """HuggingFace 数据集采集器"""
+
 from __future__ import annotations
 
 import asyncio
@@ -26,6 +27,10 @@ class HuggingFaceCollector:
 
     async def collect(self) -> List[RawCandidate]:
         """采集符合下载量与关键词要求的数据集"""
+
+        if not self.cfg.enabled:
+            logger.info("HuggingFace采集器已禁用,直接返回空列表")
+            return []
 
         try:
             datasets = await self._fetch_datasets()
@@ -124,7 +129,12 @@ class HuggingFaceCollector:
         summary = self._extract_summary(data)
         # 安全访问嵌套字典：cardData可能为None
         card_data = data.get("cardData") or data.get("card_data") or {}
-        authors = card_data.get("authors")
+        authors_field = card_data.get("authors")
+        authors: Optional[List[str]] = None
+        if isinstance(authors_field, list):
+            authors = [str(item) for item in authors_field if item]
+        elif isinstance(authors_field, str):
+            authors = [authors_field]
         publish_date = self._parse_datetime(
             data.get("lastModified")
             or data.get("last_modified")
@@ -140,6 +150,11 @@ class HuggingFaceCollector:
         task_tags = [t for t in tags if t.startswith("task_categories:")]
         task_type = task_tags[0].replace("task_categories:", "") if task_tags else None
 
+        raw_metadata = {
+            "downloads": str(data.get("downloads") or ""),
+            "tags": ",".join(str(tag) for tag in (data.get("tags") or [])),
+        }
+
         return RawCandidate(
             title=card_data.get("pretty_name") or dataset_id,
             url=f"https://huggingface.co/datasets/{dataset_id}",
@@ -149,10 +164,7 @@ class HuggingFaceCollector:
             publish_date=publish_date,
             dataset_url=f"https://huggingface.co/datasets/{dataset_id}",
             task_type=task_type,  # Phase 6: 任务类型（从tags提取）
-            raw_metadata={
-                "downloads": data.get("downloads"),
-                "tags": data.get("tags"),
-            },
+            raw_metadata=raw_metadata,
         )
 
     def _extract_summary(self, data: dict[str, Any]) -> str:

@@ -1,32 +1,92 @@
-"""GitHub Trending采集器"""
+"""GitHub Benchmark采集器 (Phase 7强化版)"""
+
 from __future__ import annotations
 
 import asyncio
 import logging
 import os
+import re
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from typing import List
+from typing import Any, Dict, List, Optional, cast
 
 import httpx
 
 from src.common import constants
+from src.common.url_extractor import URLExtractor
+from src.config import Settings, get_settings
 from src.models import RawCandidate
 
 logger = logging.getLogger(__name__)
 
 
-class GitHubCollector:
-    """通过GitHub Search API抓取高star仓库"""
+@dataclass(slots=True)
+class ReadmeExtraction:
+    """README解析结果容器"""
 
-    def __init__(self) -> None:
-        self.topics = constants.GITHUB_TOPICS
-        self.min_stars = constants.GITHUB_MIN_STARS
-        self.timeout = constants.GITHUB_TIMEOUT_SECONDS
-        self.api_url = "https://api.github.com/search/repositories"
+    metrics: List[str]
+    baselines: List[str]
+    dataset_size: Optional[str]
+
+
+class GitHubCollector:
+    """通过GitHub Search API抓取高质量Benchmark仓库"""
+
+    README_REQUIRED_KEYWORDS = {
+        kw.lower() for kw in constants.GITHUB_README_REQUIRED_KEYWORDS
+    }
+    README_EXCLUDED_KEYWORDS = {
+        kw.lower() for kw in constants.GITHUB_README_EXCLUDED_KEYWORDS
+    }
+    METRIC_PATTERNS: Dict[str, str] = {
+        r"pass@\d+": "PASS",
+        r"bleu(?:-\d+)?": "BLEU",
+        r"rouge(?:-[l1-3])?": "ROUGE",
+        r"f1-?score": "F1-Score",
+        r"accuracy": "Accuracy",
+        r"precision": "Precision",
+        r"recall": "Recall",
+        r"exact match": "Exact Match",
+        r"code pass rate": "Code Pass Rate",
+        r"success rate": "Success Rate",
+    }
+    BASELINE_PATTERNS: Dict[str, str] = {
+        r"gpt-4(?:-turbo|-o)?": "GPT-4",
+        r"gpt-3\.5(?:-turbo)?": "GPT-3.5",
+        r"claude[\s-]?(?:3\.5|3|opus|sonnet)": "Claude",
+        r"llama[-\s]?3(?:\.1)?-?\d{1,3}[mb]?": "Llama",
+        r"llama[-\s]?2-?\d{1,3}[mb]?": "Llama",
+        r"code\s?llama": "Code Llama",
+        r"starcoder": "StarCoder",
+        r"codex": "Codex",
+        r"mistral": "Mistral",
+        r"deepseek": "DeepSeek",
+    }
+    DATASET_SIZE_PATTERNS: List[str] = [
+        r"\b\d{1,3}(?:[,\s]\d{3})*(?:\s*(?:k|m))?\s*(?:samples?|problems?|questions?|tasks?|examples?|test\s+cases?)\b",
+        r"(?:contains|includes|consists\s+of)\s+\d{1,3}(?:[,\s]\d{3})*(?:\s*(?:k|m))?\s*\w*",
+    ]
+
+    def __init__(self, settings: Optional[Settings] = None) -> None:
+        self.settings = settings or get_settings()
+        self.github_config = self.settings.sources.github
+        self.topics = self.github_config.topics or constants.GITHUB_TOPICS
+        self.min_stars = self.github_config.min_stars
+        self.timeout = self.github_config.timeout_seconds
+        self.api_url = self.github_config.search_api or constants.GITHUB_SEARCH_API
         self.per_page = 5
-        self.token = os.getenv("GITHUB_TOKEN")
+        self.lookback_days = self.github_config.lookback_days
+        self.languages = {lang.lower() for lang in (self.github_config.languages or [])}
+        self.min_readme_length = self.github_config.min_readme_length
+        self.max_days_since_update = self.github_config.max_days_since_update
+        self.token = self.github_config.token or os.getenv("GITHUB_TOKEN")
+        self._readme_cache: Dict[str, Optional[str]] = {}
 
     async def collect(self) -> List[RawCandidate]:
+        if not self.github_config.enabled:
+            logger.info("GitHub采集器已禁用,直接返回空列表")
+            return []
+
         candidates: List[RawCandidate] = []
 
         headers = self._build_headers("application/vnd.github+json")
@@ -36,10 +96,10 @@ class GitHubCollector:
             results = await asyncio.gather(*tasks, return_exceptions=True)
 
         for topic, result in zip(self.topics, results, strict=False):
-            if isinstance(result, Exception):
+            if isinstance(result, BaseException):
                 logger.error("GitHub API 任务失败(%s): %s", topic, result)
                 continue
-            candidates.extend(result)
+            candidates.extend(cast(List[RawCandidate], result))
 
         logger.info("GitHub采集完成,候选总数%s", len(candidates))
         return candidates
@@ -49,9 +109,9 @@ class GitHubCollector:
     ) -> List[RawCandidate]:
         """调用GitHub搜索API"""
 
-        lookback_date = (datetime.now(timezone.utc) - timedelta(days=constants.GITHUB_LOOKBACK_DAYS)).strftime(
-            "%Y-%m-%d"
-        )
+        lookback_date = (
+            datetime.now(timezone.utc) - timedelta(days=self.lookback_days)
+        ).strftime("%Y-%m-%d")
         params = {
             "q": f"{topic} benchmark in:name,description,readme pushed:>={lookback_date}",
             "sort": "stars",
@@ -65,37 +125,12 @@ class GitHubCollector:
 
         parsed: List[RawCandidate] = []
         for repo in items:
-            stars = repo.get("stargazers_count", 0)
-            if stars < self.min_stars:
+            if not self._passes_basic_repo_filters(repo):
                 continue
 
-            readme_text = await self._fetch_readme(client, repo.get("full_name", ""))
-            abstract = readme_text or repo.get("description")
-
-            # 提取License类型（Phase 6字段）
-            license_info = repo.get("license")
-            license_type = license_info.get("name") if license_info else None
-
-            # 提取任务类型（Phase 6字段）
-            task_type = self._extract_task_type(readme_text or repo.get("description", ""))
-
-            parsed.append(
-                RawCandidate(
-                    title=repo.get("full_name", ""),
-                    url=repo.get("html_url", ""),
-                    source="github",
-                    abstract=abstract,
-                    github_stars=stars,
-                    github_url=repo.get("html_url"),
-                    publish_date=self._parse_datetime(repo.get("pushed_at")),
-                    license_type=license_type,  # Phase 6: License类型（GitHub API返回）
-                    task_type=task_type,         # Phase 6: 任务类型（从README提取）
-                    raw_metadata={
-                        "topic": topic,
-                        "language": repo.get("language"),
-                    },
-                )
-            )
+            candidate = await self._build_candidate(client, repo, topic)
+            if candidate:
+                parsed.append(candidate)
 
         return parsed
 
@@ -108,26 +143,170 @@ class GitHubCollector:
         except ValueError:
             return None
 
-    async def _fetch_readme(self, client: httpx.AsyncClient, full_name: str) -> str:
-        """获取README文本,用于后续预筛选长度判断"""
+    async def _build_candidate(
+        self,
+        client: httpx.AsyncClient,
+        repo: Dict[str, Any],
+        topic: str,
+    ) -> Optional[RawCandidate]:
+        """拉取README并根据白/黑名单判断是否为Benchmark"""
+
+        full_name = repo.get("full_name", "")
+        readme_text = await self._fetch_readme(client, full_name)
+        if not readme_text:
+            logger.debug("GitHub仓库无README: %s", full_name)
+            return None
+
+        if len(readme_text) < self.min_readme_length:
+            logger.debug("GitHub README过短(%s): %s", len(readme_text), full_name)
+            return None
+
+        if not self._is_benchmark_repo(readme_text):
+            logger.debug("GitHub仓库不符合Benchmark特征: %s", full_name)
+            return None
+
+        stars = repo.get("stargazers_count", 0)
+        license_info = repo.get("license")
+        license_type = license_info.get("name") if license_info else None
+        task_type = self._extract_task_type(readme_text or repo.get("description", ""))
+
+        readme_meta = self._extract_raw_metadata(readme_text)
+
+        # 从README中提取数据集URL
+        dataset_url = URLExtractor.extract_dataset_url(readme_text) if readme_text else None
+
+        return RawCandidate(
+            title=repo.get("full_name", ""),
+            url=repo.get("html_url", ""),
+            source="github",
+            abstract=readme_text,
+            github_stars=stars,
+            github_url=repo.get("html_url"),
+            publish_date=self._parse_datetime(repo.get("pushed_at")),
+            license_type=license_type,
+            task_type=task_type,
+            dataset_url=dataset_url,  # 新增：从README提取数据集URL
+            raw_metrics=readme_meta.metrics or None,
+            raw_baselines=readme_meta.baselines or None,
+            raw_dataset_size=readme_meta.dataset_size,
+            raw_metadata={
+                "topic": topic,
+                "language": str(repo.get("language") or ""),
+            },
+        )
+
+    async def _fetch_readme(
+        self,
+        client: httpx.AsyncClient,
+        full_name: str,
+        max_size: int = 10000,
+    ) -> Optional[str]:
+        """获取README文本并做简单缓存,避免重复请求"""
 
         if not full_name:
-            return ""
+            return None
+
+        if full_name in self._readme_cache:
+            return self._readme_cache[full_name]
 
         url = f"https://api.github.com/repos/{full_name}/readme"
         headers = self._build_headers("application/vnd.github.raw")
         try:
             resp = await client.get(url, headers=headers)
             resp.raise_for_status()
-            return resp.text
-        except httpx.HTTPError:
-            return ""
+            content = resp.text[:max_size]
+            self._readme_cache[full_name] = content
+            return content
+        except httpx.HTTPError as exc:
+            logger.debug("README获取失败(%s): %s", full_name, exc)
+            self._readme_cache[full_name] = None
+            return None
 
     def _build_headers(self, accept: str) -> dict[str, str]:
-        headers = {"Accept": accept}
+        headers = {"Accept": accept, "User-Agent": "BenchScope/1.0"}
         if self.token:
             headers["Authorization"] = f"Bearer {self.token}"
         return headers
+
+    def _passes_basic_repo_filters(self, repo: Dict[str, Any]) -> bool:
+        """基础过滤: stars/语言/更新时间"""
+
+        stars = repo.get("stargazers_count", 0)
+        if stars < self.min_stars:
+            return False
+
+        language = (repo.get("language") or "").lower()
+        if self.languages and language and language not in self.languages:
+            return False
+
+        pushed_at = self._parse_datetime(repo.get("pushed_at"))
+        if pushed_at is None:
+            return False
+
+        now = datetime.now(timezone.utc)
+        if (now - pushed_at).days > self.max_days_since_update:
+            return False
+
+        return True
+
+    def _is_benchmark_repo(self, readme_text: str) -> bool:
+        """通过关键词白/黑名单识别Benchmark仓库"""
+
+        text = readme_text.lower()
+        if any(excluded in text for excluded in self.README_EXCLUDED_KEYWORDS):
+            return False
+
+        return any(required in text for required in self.README_REQUIRED_KEYWORDS)
+
+    def _extract_raw_metadata(self, readme_text: str) -> ReadmeExtraction:
+        """从README中提取Phase8所需的基础元数据"""
+
+        metrics: List[str] = []
+        baselines: List[str] = []
+        dataset_size: Optional[str] = None
+
+        lowered = readme_text.lower()
+
+        for pattern, label in self.METRIC_PATTERNS.items():
+            for match in re.finditer(pattern, lowered, flags=re.IGNORECASE):
+                raw_text = match.group(0).strip()
+                if not raw_text:
+                    continue
+                if label == "PASS":
+                    formatted = raw_text.lower().replace("pass", "Pass")
+                elif label in {"BLEU", "ROUGE"}:
+                    formatted = raw_text.upper().replace(" ", "")
+                elif label == "F1-Score":
+                    formatted = "F1-Score"
+                elif label == "Exact Match":
+                    formatted = "Exact Match"
+                elif label == "Code Pass Rate":
+                    formatted = "Code Pass Rate"
+                else:
+                    formatted = label
+                if formatted not in metrics:
+                    metrics.append(formatted)
+                if len(metrics) >= constants.MAX_EXTRACTED_METRICS:
+                    break
+            if len(metrics) >= constants.MAX_EXTRACTED_METRICS:
+                break
+
+        for pattern, label in self.BASELINE_PATTERNS.items():
+            for _match in re.finditer(pattern, lowered, flags=re.IGNORECASE):
+                if label not in baselines:
+                    baselines.append(label)
+                if len(baselines) >= constants.MAX_EXTRACTED_BASELINES:
+                    break
+            if len(baselines) >= constants.MAX_EXTRACTED_BASELINES:
+                break
+
+        for pattern in self.DATASET_SIZE_PATTERNS:
+            size_match = re.search(pattern, readme_text, flags=re.IGNORECASE)
+            if size_match:
+                dataset_size = size_match.group(0).strip()
+                break
+
+        return ReadmeExtraction(metrics=metrics, baselines=baselines, dataset_size=dataset_size)
 
     @staticmethod
     def _extract_task_type(text: str) -> str | None:

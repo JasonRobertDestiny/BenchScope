@@ -91,10 +91,11 @@ cp .env.example .env.local
 
 ```bash
 # 完整流程: 采集 → 预筛 → 评分 → 存储 → 通知
-python src/main.py
+# 注意: 必须从项目根目录运行，使用模块方式
+python -m src.main
 
 # 或使用虚拟环境完整路径
-.venv/bin/python src/main.py
+.venv/bin/python -m src.main
 ```
 
 ### 3. (可选) 调整配置
