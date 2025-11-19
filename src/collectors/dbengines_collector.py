@@ -48,9 +48,18 @@ class DBEnginesCollector:
             return []
 
         soup = BeautifulSoup(resp.text, "html.parser")
-        rows = soup.select("table.dbi tbody tr")
-        if not rows:
+        table = soup.select_one("table.dbi")
+        if not table:
             logger.warning("DB-Engines页面结构变化,未找到排名表")
+            return []
+
+        rows = [
+            row
+            for row in table.select("tr")
+            if row.select_one("td") and row.select_one("th.pad-l")
+        ]
+        if not rows:
+            logger.warning("DB-Engines页面结构变化,未匹配到数据行")
             return []
 
         candidates: List[RawCandidate] = []
@@ -66,10 +75,10 @@ class DBEnginesCollector:
         """解析单行排名数据"""
 
         try:
-            rank_cell = row.select_one("td:nth-child(1)")
-            name_cell = row.select_one("td:nth-child(2) a")
-            type_cell = row.select_one("td:nth-child(3)")
-            score_cell = row.select_one("td:nth-child(4)")
+            rank_cell = row.select_one("td:nth-of-type(1)")
+            name_cell = row.select_one("th.pad-l a")
+            type_cell = row.select_one("th.pad-r")
+            score_cell = row.select_one("td.pad-l")
         except Exception as exc:  # noqa: BLE001
             logger.warning("解析DB-Engines第%s行失败: %s", idx + 1, exc)
             return None

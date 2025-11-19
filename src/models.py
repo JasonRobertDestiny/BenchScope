@@ -17,6 +17,7 @@ SourceType = Literal[
     "helm",
     "techempower",
     "dbengines",
+    "twitter",
 ]
 
 
@@ -79,6 +80,22 @@ class ScoredCandidate:
     relevance_score: float = 0.0  # MGX适配度 (10%)
     score_reasoning: str = ""
     custom_total_score: Optional[float] = None  # 后端专项评分可覆盖总分
+
+    # 全LLM统一评分新增：详细推理字段（每个维度150+字符）
+    activity_reasoning: str = ""  # 活跃度详细推理
+    reproducibility_reasoning: str = ""  # 可复现性详细推理
+    license_reasoning: str = ""  # 许可合规详细推理
+    novelty_reasoning: str = ""  # 新颖性详细推理
+    relevance_reasoning: str = ""  # MGX适配度详细推理
+
+    # 后端专项评分字段（仅后端Benchmark）
+    backend_mgx_relevance: float = 0.0  # 后端MGX相关性评分 (0-10)
+    backend_mgx_reasoning: str = ""  # 后端MGX相关性详细推理 (200+字符)
+    backend_engineering_value: float = 0.0  # 后端工程实践价值评分 (0-10)
+    backend_engineering_reasoning: str = ""  # 后端工程价值详细推理 (200+字符)
+
+    # 综合推理字段（50+字符，总结性陈述）
+    overall_reasoning: str = ""  # 综合评估推理
 
     # Phase 6 新增字段
     paper_url: Optional[str] = None  # 论文URL (独立于GitHub URL)

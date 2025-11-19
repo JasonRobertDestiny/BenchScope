@@ -241,16 +241,28 @@ feishu_chat:
 # ============================================================
 
 twitter:
-  enabled: false  # Phase 7+
-  api_key: ${TWITTER_API_KEY}
-  api_secret: ${TWITTER_API_SECRET}
-  monitored_accounts:
-    - "@paperswithcode"
-    - "@huggingface"
-  keywords:
-    - "#benchmark"
-    - "#evaluation"
-  lookback_days: 3
+  # ⚠️ Twitter API v2 免费套餐限制说明:
+  # - 免费API每月仅100次读取，不支持Search API
+  # - 数据采集需要Basic套餐（$100/月）或更高级别
+  # - 详见: https://developer.x.com/en/docs/x-api/rate-limits
+  enabled: false  # 默认禁用（需付费API才能采集）
+  lookback_days: 7
+  max_results_per_query: 50
+  search_queries:
+    tier1:
+      - "arxiv.org benchmark"
+      - "github.com benchmark"
+      - "huggingface.co benchmark"
+    tier2:
+      - "HumanEval arxiv"
+      - "SWE-bench github"
+      - "agent benchmark paper"
+  filters:
+    min_likes: 50
+    min_retweets: 20
+    must_have_url: true
+    language: "en"
+  rate_limit_delay: 5.0
 
 # ============================================================
 # 后端专项数据源 (Backend-Specific Sources)

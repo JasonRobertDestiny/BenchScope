@@ -12,7 +12,7 @@ from typing import Any, Dict, List, Optional, cast
 
 import httpx
 
-from src.common import constants
+from src.common import clean_summary_text, constants
 from src.common.url_extractor import URLExtractor
 from src.config import Settings, get_settings
 from src.models import RawCandidate
@@ -80,6 +80,8 @@ class GitHubCollector:
         self.min_readme_length = self.github_config.min_readme_length
         self.max_days_since_update = self.github_config.max_days_since_update
         self.token = self.github_config.token or os.getenv("GITHUB_TOKEN")
+        self.max_retries = self.github_config.max_retries
+        self.retry_delay = self.github_config.retry_delay_seconds
         self._readme_cache: Dict[str, Optional[str]] = {}
 
     async def collect(self) -> List[RawCandidate]:
@@ -90,14 +92,17 @@ class GitHubCollector:
         candidates: List[RawCandidate] = []
 
         headers = self._build_headers("application/vnd.github+json")
+        timeout = httpx.Timeout(self.timeout)
 
-        async with httpx.AsyncClient(timeout=self.timeout, headers=headers) as client:
+        async with httpx.AsyncClient(
+            timeout=timeout, headers=headers, follow_redirects=True
+        ) as client:
             tasks = [self._fetch_topic(client, topic) for topic in self.topics]
             results = await asyncio.gather(*tasks, return_exceptions=True)
 
         for topic, result in zip(self.topics, results, strict=False):
             if isinstance(result, BaseException):
-                logger.error("GitHub API 任务失败(%s): %s", topic, result)
+                logger.error("GitHub API 任务失败(%s): %r", topic, result)
                 continue
             candidates.extend(cast(List[RawCandidate], result))
 
@@ -118,8 +123,7 @@ class GitHubCollector:
             "order": "desc",
             "per_page": self.per_page,
         }
-        resp = await client.get(self.api_url, params=params)
-        resp.raise_for_status()
+        resp = await self._request_with_retry(client, params, topic)
         data = resp.json()
         items = data.get("items", [])
 
@@ -133,6 +137,34 @@ class GitHubCollector:
                 parsed.append(candidate)
 
         return parsed
+
+    async def _request_with_retry(
+        self, client: httpx.AsyncClient, params: Dict[str, Any], topic: str
+    ) -> httpx.Response:
+        last_exc: Optional[Exception] = None
+        for attempt in range(1, self.max_retries + 1):
+            try:
+                resp = await client.get(self.api_url, params=params)
+                resp.raise_for_status()
+                return resp
+            except (httpx.HTTPError, httpx.TransportError) as exc:  # noqa: PERF203
+                last_exc = exc
+                if attempt == self.max_retries:
+                    break
+                delay = self.retry_delay * attempt
+                logger.warning(
+                    "GitHub API调用失败(topic=%s, attempt=%s/%s): %r，%s后重试",
+                    topic,
+                    attempt,
+                    self.max_retries,
+                    exc,
+                    delay,
+                )
+                await asyncio.sleep(delay)
+
+        if last_exc:
+            raise last_exc
+        raise RuntimeError("GitHub API未知错误")
 
     @staticmethod
     def _parse_datetime(value: str | None) -> datetime | None:
@@ -175,11 +207,15 @@ class GitHubCollector:
         # 从README中提取数据集URL
         dataset_url = URLExtractor.extract_dataset_url(readme_text) if readme_text else None
 
+        # 清理README文本（去除HTML/Markdown噪声）
+        # 这是为了解决飞书表格中abstract字段被污染的问题（包含<!-- <p align="center"> <img alt=... 等HTML标签）
+        cleaned_abstract = clean_summary_text(readme_text, max_length=2000) if readme_text else None
+
         return RawCandidate(
             title=repo.get("full_name", ""),
             url=repo.get("html_url", ""),
             source="github",
-            abstract=readme_text,
+            abstract=cleaned_abstract,  # 使用清理后的文本
             github_stars=stars,
             github_url=repo.get("html_url"),
             publish_date=self._parse_datetime(repo.get("pushed_at")),

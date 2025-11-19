@@ -7,6 +7,7 @@ from src.collectors.helm_collector import HelmCollector
 from src.collectors.huggingface_collector import HuggingFaceCollector
 from src.collectors.semantic_scholar_collector import SemanticScholarCollector
 from src.collectors.techempower_collector import TechEmpowerCollector
+from src.collectors.twitter_collector import TwitterCollector
 
 __all__ = [
     "ArxivCollector",
@@ -16,4 +17,5 @@ __all__ = [
     "HuggingFaceCollector",
     "SemanticScholarCollector",
     "TechEmpowerCollector",
+    "TwitterCollector",
 ]

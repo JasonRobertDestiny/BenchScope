@@ -89,6 +89,8 @@ class GitHubSourceSettings:
     token: Optional[str] = None
     min_readme_length: int = constants.GITHUB_MIN_README_LENGTH
     max_days_since_update: int = constants.GITHUB_MAX_DAYS_SINCE_UPDATE
+    max_retries: int = constants.GITHUB_MAX_RETRIES
+    retry_delay_seconds: float = constants.GITHUB_RETRY_DELAY_SECONDS
 
 
 @dataclass(slots=True)
@@ -122,6 +124,26 @@ class DBEnginesSourceSettings:
 
 
 @dataclass(slots=True)
+class TwitterSourceSettings:
+    """Twitter/X 数据源配置"""
+
+    enabled: bool = False
+    lookback_days: int = constants.TWITTER_LOOKBACK_DAYS
+    max_results_per_query: int = constants.TWITTER_MAX_RESULTS_PER_QUERY
+    tier1_queries: list[str] = field(
+        default_factory=lambda: constants.TWITTER_TIER1_QUERIES.copy()
+    )
+    tier2_queries: list[str] = field(
+        default_factory=lambda: constants.TWITTER_TIER2_QUERIES.copy()
+    )
+    min_likes: int = constants.TWITTER_MIN_LIKES
+    min_retweets: int = constants.TWITTER_MIN_RETWEETS
+    must_have_url: bool = True
+    language: str = constants.TWITTER_DEFAULT_LANGUAGE
+    rate_limit_delay: float = constants.TWITTER_RATE_LIMIT_DELAY
+
+
+@dataclass(slots=True)
 class SourcesSettings:
     arxiv: ArxivSourceSettings = field(default_factory=ArxivSourceSettings)
     helm: HelmSourceSettings = field(default_factory=HelmSourceSettings)
@@ -135,6 +157,9 @@ class SourcesSettings:
     dbengines: DBEnginesSourceSettings = field(
         default_factory=DBEnginesSourceSettings
     )
+    twitter: TwitterSourceSettings = field(
+        default_factory=TwitterSourceSettings
+    )
 
 
 @dataclass(slots=True)
@@ -145,6 +170,7 @@ class Settings:
     logging: LoggingSettings
     sqlite_path: Path
     sources: SourcesSettings
+    twitter_bearer_token: Optional[str] = None
 
 
 def _get_env(key: str, default: Optional[str] = None) -> str:
@@ -187,6 +213,7 @@ def get_settings() -> Settings:
         ),
         sqlite_path=Path(sqlite_path_str),
         sources=_load_sources_settings(sources_path),
+        twitter_bearer_token=os.getenv("TWITTER_BEARER_TOKEN"),
     )
 
 
@@ -208,6 +235,9 @@ def _load_sources_settings(path: Path) -> SourcesSettings:
     huggingface_cfg = data.get("huggingface", {})
     techempower_cfg = data.get("techempower", {})
     dbengines_cfg = data.get("dbengines", {})
+    twitter_cfg = data.get("twitter", {})
+    twitter_filters = twitter_cfg.get("filters", {}) or {}
+    twitter_queries = twitter_cfg.get("search_queries", {}) or {}
     return SourcesSettings(
         arxiv=ArxivSourceSettings(
             enabled=bool(arxiv_cfg.get("enabled", True)),
@@ -319,6 +349,43 @@ def _load_sources_settings(path: Path) -> SourcesSettings:
             ),
             max_results=int(
                 dbengines_cfg.get("max_results", constants.DBENGINES_MAX_RESULTS)
+            ),
+        ),
+        twitter=TwitterSourceSettings(
+            enabled=bool(twitter_cfg.get("enabled", False)),
+            lookback_days=int(
+                twitter_cfg.get(
+                    "lookback_days", constants.TWITTER_LOOKBACK_DAYS
+                )
+            ),
+            max_results_per_query=int(
+                twitter_cfg.get(
+                    "max_results_per_query",
+                    constants.TWITTER_MAX_RESULTS_PER_QUERY,
+                )
+            ),
+            tier1_queries=_ensure_list(
+                twitter_queries.get("tier1"), constants.TWITTER_TIER1_QUERIES
+            ),
+            tier2_queries=_ensure_list(
+                twitter_queries.get("tier2"), constants.TWITTER_TIER2_QUERIES
+            ),
+            min_likes=int(
+                twitter_filters.get("min_likes", constants.TWITTER_MIN_LIKES)
+            ),
+            min_retweets=int(
+                twitter_filters.get("min_retweets", constants.TWITTER_MIN_RETWEETS)
+            ),
+            must_have_url=bool(twitter_filters.get("must_have_url", True)),
+            language=str(
+                twitter_filters.get(
+                    "language", constants.TWITTER_DEFAULT_LANGUAGE
+                )
+            ),
+            rate_limit_delay=float(
+                twitter_cfg.get(
+                    "rate_limit_delay", constants.TWITTER_RATE_LIMIT_DELAY
+                )
             ),
         ),
     )

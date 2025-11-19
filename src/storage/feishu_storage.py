@@ -5,11 +5,11 @@ from __future__ import annotations
 import asyncio
 import logging
 from datetime import datetime, timedelta
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 import httpx
 
-from src.common import constants
+from src.common import clean_summary_text, constants
 from src.config import Settings, get_settings
 from src.models import ScoredCandidate
 
@@ -61,6 +61,8 @@ class FeishuStorage:
         self.rate_interval = constants.FEISHU_RATE_LIMIT_DELAY
         self.access_token: Optional[str] = None
         self.token_expire_at: Optional[datetime] = None
+        self._field_names: Optional[set[str]] = None
+        self._missing_fields_logged: bool = False
 
     async def save(self, candidates: List[ScoredCandidate]) -> None:
         """批量写入飞书多维表格"""
@@ -87,8 +89,23 @@ class FeishuStorage:
             f"tables/{self.settings.feishu.bitable_table_id}/records/batch_create"
         )
         try:
+            await self._ensure_field_cache(client)
+
+            filtered_records = [
+                {"fields": self._filter_existing_fields(record["fields"])}
+                for record in records
+            ]
+
+            # 如果全部字段都被过滤掉，直接跳过，避免提交空记录
+            filtered_records = [
+                record for record in filtered_records if record["fields"]
+            ]
+            if not filtered_records:
+                logger.warning("全部字段均缺失于飞书表，跳过本批次写入")
+                return
+
             resp = await client.post(
-                url, headers=self._auth_header(), json={"records": records}
+                url, headers=self._auth_header(), json={"records": filtered_records}
             )
             resp.raise_for_status()
 
@@ -106,7 +123,7 @@ class FeishuStorage:
             # 检查实际写入的记录数
             created_records = data.get("data", {}).get("records", [])
             actual_count = len(created_records)
-            expected_count = len(records)
+            expected_count = len(filtered_records)
 
             if actual_count != expected_count:
                 logger.warning(
@@ -116,7 +133,9 @@ class FeishuStorage:
                 )
 
             logger.info(
-                "飞书批次写入成功: %s条 (实际创建%s条)", len(records), actual_count
+                "飞书批次写入成功: %s条 (实际创建%s条)",
+                len(filtered_records),
+                actual_count,
             )
 
         except httpx.HTTPStatusError as exc:
@@ -150,37 +169,88 @@ class FeishuStorage:
             raise FeishuAPIError("access_token不存在")
         return {"Authorization": f"Bearer {self.access_token}"}
 
+    def _filter_existing_fields(self, fields: Dict[str, Any]) -> Dict[str, Any]:
+        if not self._field_names:
+            return fields
+        filtered = {
+            name: value for name, value in fields.items() if name in self._field_names
+        }
+        if not self._missing_fields_logged:
+            missing = set(fields.keys()) - set(filtered.keys())
+            if missing:
+                logger.warning(
+                    "飞书表缺少以下字段，已跳过写入: %s",
+                    ", ".join(sorted(missing)),
+                )
+            self._missing_fields_logged = True
+        return filtered
+
+    async def _ensure_field_cache(self, client: httpx.AsyncClient) -> None:
+        if self._field_names is not None:
+            return
+
+        url = (
+            f"{self.base_url}/bitable/v1/apps/{self.settings.feishu.bitable_app_token}/"
+            f"tables/{self.settings.feishu.bitable_table_id}/fields"
+        )
+        params: Dict[str, Any] = {"page_size": 500}
+        headers = self._auth_header()
+        field_names: set[str] = set()
+
+        seen_tokens: set[str] = set()
+        max_pages = 100
+        page_count = 0
+        while page_count < max_pages:
+            page_count += 1
+            resp = await client.get(url, headers=headers, params=params)
+            resp.raise_for_status()
+            data = resp.json()
+            data_obj = data.get("data") or {}
+            items = data_obj.get("items") or []
+            has_more = bool(data_obj.get("has_more"))
+
+            count_before = len(field_names)
+            for item in items:
+                name = item.get("field_name")
+                if name:
+                    field_names.add(name)
+            page_token = data_obj.get("page_token")
+            added_fields = len(field_names) - count_before
+
+            if not page_token or not has_more:
+                break
+            if added_fields == 0 or page_token in seen_tokens:
+                logger.warning(
+                    "飞书字段分页返回空结果或重复token(%s)，终止翻页",
+                    page_token,
+                )
+                break
+
+            seen_tokens.add(page_token)
+            params["page_token"] = page_token
+
+        if page_count >= max_pages:
+            logger.warning(
+                "飞书字段分页达到最大次数限制(%d)，可能存在异常响应",
+                max_pages,
+            )
+
+        self._field_names = field_names
+
     @staticmethod
-    def _clean_abstract(text: str | None, max_length: int = 300) -> str:
+    def _clean_abstract(text: str | None, max_length: int | None = None) -> str:
         """清理摘要文本，优化飞书表格显示
 
         - 移除换行符，用空格替代
-        - 清理多余空格
-        - 限制长度
-        - 移除markdown格式符号
+        - 清除HTML/Markdown噪声（图片、注释、标签）
+        - 限制长度（可选）
         """
-        if not text:
+        cleaned = clean_summary_text(text, max_length=max_length)
+        if not cleaned:
             return ""
 
-        # 移除换行符和tab，用空格替代
-        cleaned = text.replace("\n", " ").replace("\r", " ").replace("\t", " ")
-
-        # 清理多余空格
-        cleaned = " ".join(cleaned.split())
-
-        # 移除常见markdown符号
         for char in ["**", "__", "##", "```"]:
             cleaned = cleaned.replace(char, "")
-
-        # 限制长度（保留完整单词）
-        if len(cleaned) > max_length:
-            # 截断到max_length-3为...留出空间，然后在最后一个空格处断开
-            truncated = cleaned[: max_length - 3]
-            last_space = truncated.rfind(" ")
-            if last_space > max_length * 0.8:  # 如果最后空格位置合理（不是太靠前）
-                cleaned = truncated[:last_space] + "..."
-            else:  # 否则直接截断
-                cleaned = truncated + "..."
 
         return cleaned
 
@@ -215,7 +285,7 @@ class FeishuStorage:
             ],
         }
 
-        # Phase 8新增字段 - 谨慎处理空值
+        # Phase 8字段 - 谨慎处理空值
         if hasattr(candidate, "github_stars") and candidate.github_stars is not None:
             fields[self.FIELD_MAPPING["github_stars"]] = candidate.github_stars
 
@@ -243,22 +313,26 @@ class FeishuStorage:
                 # 如果已经是列表,直接使用
                 fields[self.FIELD_MAPPING["task_domain"]] = task_domain
 
-        if getattr(candidate, "metrics", None):
-            metrics_str = ", ".join(candidate.metrics)[:200]
+        metrics = getattr(candidate, "metrics", None)
+        if metrics:
+            metrics_str = ", ".join(metrics)[:200]
             fields[self.FIELD_MAPPING["metrics"]] = metrics_str
 
-        if getattr(candidate, "baselines", None):
-            baselines_str = ", ".join(candidate.baselines)[:200]
+        baselines = getattr(candidate, "baselines", None)
+        if baselines:
+            baselines_str = ", ".join(baselines)[:200]
             fields[self.FIELD_MAPPING["baselines"]] = baselines_str
 
-        if getattr(candidate, "institution", None):
-            fields[self.FIELD_MAPPING["institution"]] = candidate.institution[:200]
+        institution = getattr(candidate, "institution", None)
+        if institution:
+            fields[self.FIELD_MAPPING["institution"]] = institution[:200]
 
         if getattr(candidate, "dataset_size", None) is not None:
             fields[self.FIELD_MAPPING["dataset_size"]] = candidate.dataset_size
 
-        if getattr(candidate, "dataset_size_description", None):
-            desc = candidate.dataset_size_description[:200]
+        dataset_size_description = getattr(candidate, "dataset_size_description", None)
+        if dataset_size_description:
+            desc = dataset_size_description[:200]
             fields[self.FIELD_MAPPING["dataset_size_description"]] = desc
 
         if hasattr(candidate, "license_type") and candidate.license_type:

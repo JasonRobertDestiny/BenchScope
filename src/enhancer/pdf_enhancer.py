@@ -14,14 +14,25 @@ import asyncio
 import logging
 import os
 import re
+import time
+import warnings
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 import arxiv
+import httpx
+import requests
+from bs4 import XMLParsedAsHTMLWarning
 from scipdf.pdf import parse_pdf_to_dict  # type: ignore[import]
 
+from src.common import constants
 from src.models import RawCandidate
+
+# 过滤 scipdf_parser 库的 XML 解析警告
+# scipdf 内部使用 BeautifulSoup 的 HTML 解析器处理 XML，触发此警告
+# 不影响功能，lxml 已安装但 scipdf 未正确使用
+warnings.filterwarnings("ignore", category=XMLParsedAsHTMLWarning)
 
 logger = logging.getLogger(__name__)
 
@@ -61,8 +72,8 @@ class PDFEnhancer:
         self.cache_dir = Path(cache_dir or "/tmp/arxiv_pdf_cache")
         self.cache_dir.mkdir(parents=True, exist_ok=True)
 
-        # 从环境变量读取 GROBID URL，默认使用本地服务
-        self.grobid_url = os.getenv("GROBID_URL", "http://localhost:8070")
+        # 自动判定 GROBID 服务：优先环境变量，其次本地探测，最后云端兜底
+        self.grobid_url = self._resolve_grobid_url()
 
         logger.info(
             "PDFEnhancer 初始化完成，缓存目录: %s, GROBID服务: %s",
@@ -105,126 +116,222 @@ class PDFEnhancer:
             return candidate
 
     async def enhance_batch(self, candidates: List[RawCandidate]) -> List[RawCandidate]:
-        """批量增强候选项。
+        """批量增强候选项，默认采用受限并发。"""
 
-        为避免触发 arXiv 限流，这里采用串行处理并在请求间加入短暂延迟。
-        如果后续需要性能优化，可在此处实现更精细的并发控制与速率限制。
-        """
-        enhanced: List[RawCandidate] = []
-        for candidate in candidates:
-            result = await self.enhance_candidate(candidate)
-            enhanced.append(result)
-            # 短暂 sleep，降低对 arXiv 的瞬时压力
-            await asyncio.sleep(0.5)
+        if not candidates:
+            return []
 
-        return enhanced
+        concurrency = max(1, constants.PDF_ENHANCER_MAX_CONCURRENCY)
+        semaphore = asyncio.Semaphore(concurrency)
+        results: List[Optional[RawCandidate]] = [None] * len(candidates)
+
+        async def _enhance_with_lock(index: int, candidate: RawCandidate) -> None:
+            async with semaphore:
+                results[index] = await self.enhance_candidate(candidate)
+
+        tasks = [asyncio.create_task(_enhance_with_lock(idx, cand)) for idx, cand in enumerate(candidates)]
+        for task in asyncio.as_completed(tasks):
+            await task
+
+        # 并发执行后保持输入顺序，与调用方解耦
+        return [item if item is not None else candidates[idx] for idx, item in enumerate(results)]
 
     async def _download_pdf(self, arxiv_id: str) -> Optional[Path]:
-        """下载 arXiv PDF（带缓存）。
+        """下载 arXiv PDF（带缓存）。"""
 
-        下载逻辑放入线程池，以避免阻塞事件循环。
-        """
         pdf_path = self.cache_dir / f"{arxiv_id}.pdf"
 
         if pdf_path.exists():
             logger.debug("命中 PDF 缓存: %s", arxiv_id)
             return pdf_path
 
+        sdk_success = await self._download_via_arxiv_sdk(arxiv_id, pdf_path)
+        if not sdk_success:
+            http_success = await self._download_via_http(arxiv_id, pdf_path)
+            if not http_success:
+                return None
+
+        if not pdf_path.exists() or pdf_path.stat().st_size == 0:
+            logger.warning("PDF 文件异常（空文件）: %s", arxiv_id)
+            if pdf_path.exists():
+                pdf_path.unlink(missing_ok=True)
+            return None
+
+        return pdf_path
+
+    async def _download_via_arxiv_sdk(self, arxiv_id: str, pdf_path: Path) -> bool:
+        """通过官方 arxiv SDK 下载 PDF。"""
+
         try:
             search = arxiv.Search(id_list=[arxiv_id])
             paper = next(search.results())
+        except StopIteration:
+            logger.warning("未找到对应 arXiv 论文: %s", arxiv_id)
+            return False
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("arXiv API 查询失败 (%s): %s", arxiv_id, exc)
+            return False
 
-            # arxiv 库为同步 API，这里用 to_thread 放到线程池执行
+        try:
             await asyncio.to_thread(
                 paper.download_pdf,
                 dirpath=str(self.cache_dir),
                 filename=f"{arxiv_id}.pdf",
             )
-
-            if pdf_path.exists():
-                logger.info("PDF 下载成功: %s", arxiv_id)
-                return pdf_path
-
-            logger.warning("PDF 下载后文件不存在: %s", arxiv_id)
-            return None
-        except StopIteration:
-            logger.warning("未找到对应 arXiv 论文: %s", arxiv_id)
-            return None
         except Exception as exc:  # noqa: BLE001
-            logger.error("PDF 下载异常 (%s): %s", arxiv_id, exc)
-            return None
+            logger.warning("arXiv导出PDF失败，准备走HTTP兜底 (%s): %s", arxiv_id, exc)
+            return False
+
+        logger.info("PDF 下载成功 (export.arxiv.org): %s", arxiv_id)
+        return True
+
+    async def _download_via_http(self, arxiv_id: str, pdf_path: Path) -> bool:
+        """使用 HTTP 直连下载 PDF，解决 export 延迟导致的404。"""
+
+        success = await asyncio.to_thread(self._stream_pdf_to_file, arxiv_id, pdf_path)
+        if success:
+            logger.info("PDF 直连下载成功: %s", arxiv_id)
+        else:
+            logger.error("PDF 直连下载失败: %s", arxiv_id)
+        return success
+
+    def _stream_pdf_to_file(self, arxiv_id: str, pdf_path: Path) -> bool:
+        """串流写入 PDF 文件（同步函数，供线程池调用）。"""
+
+        pdf_path.parent.mkdir(parents=True, exist_ok=True)
+        # 逐步尝试 export → 主站直连，并在 404 场景下等待再试，缓解 PDF 尚未同步的问题
+        for attempt in range(1, constants.ARXIV_PDF_HTTP_MAX_RETRIES + 1):
+            for base_url in (
+                constants.ARXIV_PDF_EXPORT_BASE,
+                constants.ARXIV_PDF_PRIMARY_BASE,
+            ):
+                pdf_url = f"{base_url.rstrip('/')}/{arxiv_id}.pdf"
+                try:
+                    with httpx.stream(
+                        "GET",
+                        pdf_url,
+                        timeout=constants.ARXIV_PDF_TIMEOUT_SECONDS,
+                        follow_redirects=True,
+                    ) as response:
+                        response.raise_for_status()
+                        with pdf_path.open("wb") as file_obj:
+                            for chunk in response.iter_bytes(
+                                constants.PDF_DOWNLOAD_CHUNK_SIZE
+                            ):
+                                file_obj.write(chunk)
+                    return True
+                except httpx.HTTPStatusError as exc:
+                    logger.debug("PDF直连状态异常(%s): %s", pdf_url, exc)
+                    if exc.response.status_code == 404:
+                        continue
+                except httpx.RequestError as exc:
+                    logger.debug("PDF直连请求失败(%s): %s", pdf_url, exc)
+            time.sleep(constants.ARXIV_PDF_HTTP_RETRY_DELAY_SECONDS)
+        return False
 
     async def _parse_pdf(self, pdf_path: Path) -> Optional[PDFContent]:
-        """使用 scipdf_parser 解析 PDF。
+        """使用 scipdf_parser 解析 PDF（带 GROBID 重试与自动切换）。"""
 
-        解析会调用 GROBID 服务，耗时相对较长，因此同样放入线程池执行。
-        """
-        try:
-            # 解析结果为通用 dict，需要在使用前做类型防御
-            article_dict = await asyncio.to_thread(
-                parse_pdf_to_dict, str(pdf_path), grobid_url=self.grobid_url
-            )
-            if not isinstance(article_dict, dict):
-                logger.warning("PDF解析结果非字典类型: %s", type(article_dict))
+        article_dict = await self._call_grobid_with_retry(pdf_path)
+        if not isinstance(article_dict, dict):
+            if article_dict is None:
                 return None
-
-            sections: Dict[str, str] = {}
-            raw_sections: Any = article_dict.get("sections") or []
-            for section in raw_sections:
-                if not isinstance(section, dict):
-                    continue
-                heading = (section.get("heading") or "").strip()
-                text = (section.get("text") or "").strip()
-                if heading and text:
-                    sections[heading] = text
-
-            authors_affiliations: List[Tuple[str, str]] = []
-            raw_authors: Any = article_dict.get("authors") or []
-            for author in raw_authors:
-                if not isinstance(author, dict):
-                    continue
-                name = (author.get("name") or "").strip()
-                affiliation_dict: Any = author.get("affiliation") or {}
-                if isinstance(affiliation_dict, dict):
-                    affiliation = (affiliation_dict.get("institution") or "").strip()
-                else:
-                    affiliation = str(affiliation_dict).strip()
-
-                if name:
-                    authors_affiliations.append((name, affiliation))
-
-            evaluation_summary = self._extract_section_summary(
-                sections,
-                keywords=["evaluation", "experiments", "results", "performance"],
-                max_len=2000,
-            )
-            dataset_summary = self._extract_section_summary(
-                sections,
-                keywords=["dataset", "data", "benchmark", "corpus"],
-                max_len=1000,
-            )
-            baselines_summary = self._extract_section_summary(
-                sections,
-                keywords=["baselines", "comparison", "related work", "prior work"],
-                max_len=1000,
-            )
-
-            raw_references: Any = article_dict.get("references") or []
-            references = [str(ref) for ref in raw_references]
-
-            return PDFContent(
-                title=(article_dict.get("title") or "").strip(),
-                abstract=(article_dict.get("abstract") or "").strip(),
-                sections=sections,
-                authors_affiliations=authors_affiliations,
-                references=references,
-                evaluation_summary=evaluation_summary,
-                dataset_summary=dataset_summary,
-                baselines_summary=baselines_summary,
-            )
-        except Exception as exc:  # noqa: BLE001
-            logger.error("PDF 解析失败 (%s): %s", pdf_path.name, exc)
+            logger.warning("PDF解析结果非字典类型: %s", type(article_dict))
             return None
+
+        sections: Dict[str, str] = {}
+        raw_sections: Any = article_dict.get("sections") or []
+        for section in raw_sections:
+            if not isinstance(section, dict):
+                continue
+            heading = (section.get("heading") or "").strip()
+            text = (section.get("text") or "").strip()
+            if heading and text:
+                sections[heading] = text
+
+        authors_affiliations: List[Tuple[str, str]] = []
+        raw_authors: Any = article_dict.get("authors") or []
+        for author in raw_authors:
+            if not isinstance(author, dict):
+                continue
+            name = (author.get("name") or "").strip()
+            affiliation_dict: Any = author.get("affiliation") or {}
+            if isinstance(affiliation_dict, dict):
+                affiliation = (affiliation_dict.get("institution") or "").strip()
+            else:
+                affiliation = str(affiliation_dict).strip()
+
+            if name:
+                authors_affiliations.append((name, affiliation))
+
+        evaluation_summary = self._extract_section_summary(
+            sections,
+            keywords=["evaluation", "experiments", "results", "performance"],
+            max_len=2000,
+        )
+        dataset_summary = self._extract_section_summary(
+            sections,
+            keywords=["dataset", "data", "benchmark", "corpus"],
+            max_len=1000,
+        )
+        baselines_summary = self._extract_section_summary(
+            sections,
+            keywords=["baselines", "comparison", "related work", "prior work"],
+            max_len=1000,
+        )
+
+        raw_references: Any = article_dict.get("references") or []
+        references = [str(ref) for ref in raw_references]
+
+        return PDFContent(
+            title=(article_dict.get("title") or "").strip(),
+            abstract=(article_dict.get("abstract") or "").strip(),
+            sections=sections,
+            authors_affiliations=authors_affiliations,
+            references=references,
+            evaluation_summary=evaluation_summary,
+            dataset_summary=dataset_summary,
+            baselines_summary=baselines_summary,
+        )
+
+    async def _call_grobid_with_retry(self, pdf_path: Path) -> Optional[Dict[str, Any]]:
+        """调用 GROBID 并在连接异常时自动重试与重选服务。"""
+
+        last_exc: Optional[Exception] = None
+        for attempt in range(1, constants.GROBID_MAX_RETRIES + 1):
+            try:
+                return await asyncio.to_thread(
+                    parse_pdf_to_dict, str(pdf_path), grobid_url=self.grobid_url
+                )
+            except Exception as exc:  # noqa: BLE001
+                last_exc = exc
+                logger.warning(
+                    "GROBID解析异常(%s, 第%d/%d次): %s",
+                    pdf_path.name,
+                    attempt,
+                    constants.GROBID_MAX_RETRIES,
+                    exc,
+                )
+                if self._should_refresh_grobid(exc):
+                    self.grobid_url = self._resolve_grobid_url()
+                if attempt < constants.GROBID_MAX_RETRIES:
+                    # 简单退避，给 HuggingFace Space 释放资源
+                    await asyncio.sleep(constants.GROBID_RETRY_DELAY_SECONDS)
+
+        logger.error("PDF 解析失败 (%s): %s", pdf_path.name, last_exc)
+        return None
+
+    def _should_refresh_grobid(self, exc: Exception) -> bool:
+        """判断异常是否来源于 GROBID 网络问题，如是则重新探测服务。"""
+
+        transient_errors = (
+            httpx.RequestError,
+            requests.RequestException,
+            OSError,
+        )
+        if isinstance(exc, transient_errors):
+            return True
+        return "SSL" in str(exc).upper()
 
     def _extract_section_summary(
         self,
@@ -297,3 +404,36 @@ class PDFEnhancer:
         arxiv_id = match.group(1)
         # 去掉版本号后缀 vN
         return arxiv_id.split("v")[0]
+
+    def _resolve_grobid_url(self) -> str:
+        """确定可用的 GROBID 服务地址。"""
+
+        env_url = os.getenv("GROBID_URL")
+        if env_url:
+            return env_url
+
+        if self._is_grobid_alive(constants.GROBID_LOCAL_URL):
+            return constants.GROBID_LOCAL_URL
+
+        logger.warning(
+            "未检测到本地GROBID服务，自动切换至云端: %s",
+            constants.GROBID_CLOUD_URL,
+        )
+        return constants.GROBID_CLOUD_URL
+
+    def _is_grobid_alive(self, base_url: str) -> bool:
+        """通过版本接口探测 GROBID 可用性。"""
+
+        health_url = f"{base_url.rstrip('/')}{constants.GROBID_HEALTH_PATH}"
+        try:
+            response = httpx.get(
+                health_url,
+                timeout=constants.GROBID_HEALTH_TIMEOUT,
+            )
+            response.raise_for_status()
+            return True
+        except httpx.HTTPStatusError as exc:
+            logger.debug("GROBID状态异常(%s): %s", base_url, exc)
+        except httpx.RequestError as exc:
+            logger.debug("GROBID连接失败(%s): %s", base_url, exc)
+        return False

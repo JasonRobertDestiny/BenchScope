@@ -14,6 +14,7 @@ from src.collectors import (
     HelmCollector,
     HuggingFaceCollector,
     TechEmpowerCollector,
+    TwitterCollector,
 )
 from src.config import Settings, get_settings
 from src.enhancer import PDFEnhancer
@@ -44,6 +45,7 @@ async def main() -> None:
         HuggingFaceCollector(settings=settings),
         TechEmpowerCollector(settings=settings),
         DBEnginesCollector(settings=settings),
+        TwitterCollector(settings=settings),
     ]
 
     all_candidates: List[RawCandidate] = []

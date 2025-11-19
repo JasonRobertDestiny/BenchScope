@@ -115,5 +115,4 @@ async def test_enhance_non_arxiv_candidate(pdf_enhancer: PDFEnhancer) -> None:
 
 if __name__ == "__main__":
     # 方便在本地直接运行单个测试文件
-    asyncio.run(pytest.main([__file__, "-v"]))
-
+    raise SystemExit(pytest.main([__file__, "-v"]))

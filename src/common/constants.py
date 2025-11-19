@@ -4,6 +4,21 @@ from __future__ import annotations
 
 from typing import Final
 
+# ---- PDF增强配置 ----
+GROBID_LOCAL_URL: Final[str] = "http://localhost:8070"
+GROBID_CLOUD_URL: Final[str] = "https://kermitt2-grobid.hf.space"
+GROBID_HEALTH_PATH: Final[str] = "/api/version"
+GROBID_HEALTH_TIMEOUT: Final[float] = 2.0
+GROBID_MAX_RETRIES: Final[int] = 3
+GROBID_RETRY_DELAY_SECONDS: Final[float] = 2.0  # 降低重试延迟，加快失败恢复
+PDF_ENHANCER_MAX_CONCURRENCY: Final[int] = 3  # 降低并发，减轻云端GROBID压力
+PDF_DOWNLOAD_CHUNK_SIZE: Final[int] = 8192
+ARXIV_PDF_EXPORT_BASE: Final[str] = "https://export.arxiv.org/pdf"
+ARXIV_PDF_PRIMARY_BASE: Final[str] = "https://arxiv.org/pdf"
+ARXIV_PDF_TIMEOUT_SECONDS: Final[int] = 30
+ARXIV_PDF_HTTP_MAX_RETRIES: Final[int] = 2
+ARXIV_PDF_HTTP_RETRY_DELAY_SECONDS: Final[float] = 5.0
+
 # ---- Collector 配置 ----
 ARXIV_MAX_RESULTS: Final[int] = 50
 ARXIV_TIMEOUT_SECONDS: Final[int] = 10
@@ -97,6 +112,8 @@ GITHUB_LANGUAGES: Final[list[str]] = [
     "Rust",
 ]
 GITHUB_TIMEOUT_SECONDS: Final[int] = 5
+GITHUB_MAX_RETRIES: Final[int] = 3
+GITHUB_RETRY_DELAY_SECONDS: Final[float] = 2.0
 GITHUB_MIN_STARS: Final[int] = 50
 GITHUB_MIN_README_LENGTH: Final[int] = 500
 GITHUB_MAX_DAYS_SINCE_UPDATE: Final[int] = 90
@@ -229,6 +246,29 @@ HUGGINGFACE_MIN_DOWNLOADS: Final[int] = 100
 HUGGINGFACE_MAX_RESULTS: Final[int] = 50
 HUGGINGFACE_LOOKBACK_DAYS: Final[int] = 14  # 14天窗口，数据集更新频率中等
 
+# Twitter/X配置
+TWITTER_LOOKBACK_DAYS: Final[int] = 7
+TWITTER_MAX_RESULTS_PER_QUERY: Final[int] = 100
+TWITTER_MIN_LIKES: Final[int] = 10
+TWITTER_MIN_RETWEETS: Final[int] = 5
+TWITTER_RATE_LIMIT_DELAY: Final[float] = 2.0
+TWITTER_DEFAULT_LANGUAGE: Final[str] = "en"
+TWITTER_TIER1_QUERIES: Final[list[str]] = [
+    "AI agent benchmark",
+    "LLM code generation",
+    "multi-agent evaluation",
+    "coding benchmark",
+    "agent framework",
+]
+TWITTER_TIER2_QUERIES: Final[list[str]] = [
+    "HumanEval",
+    "MBPP benchmark",
+    "SWE-bench",
+    "agent leaderboard",
+    "LLM evaluation",
+    "code interpreter",
+]
+
 TECHEMPOWER_BASE_URL: Final[str] = "https://tfb-status.techempower.com"
 TECHEMPOWER_TIMEOUT_SECONDS: Final[int] = 15
 TECHEMPOWER_MIN_COMPOSITE_SCORE: Final[float] = 50.0
@@ -300,6 +340,10 @@ LLM_TIMEOUT_SECONDS: Final[int] = 30
 LLM_CACHE_TTL_SECONDS: Final[int] = 7 * 24 * 3600
 LLM_MAX_RETRIES: Final[int] = 3
 LLM_COMPLETION_MAX_TOKENS: Final[int] = 2000  # 提高max_tokens确保评分依据完整详细
+LLM_REASONING_MIN_CHARS: Final[int] = 150  # 五维推理字段的最小字符数
+LLM_BACKEND_REASONING_MIN_CHARS: Final[int] = 200  # 后端专项推理的最小字符数
+LLM_OVERALL_REASONING_MIN_CHARS: Final[int] = 50  # overall_reasoning的最小字符数
+LLM_SELF_HEAL_MAX_ATTEMPTS: Final[int] = 2  # LLM输出字符不足时的自动纠偏重试次数
 SCORE_CONCURRENCY: Final[int] = 50  # GPT-4o速率限制高，充分利用并发能力
 REDIS_DEFAULT_URL: Final[str] = "redis://localhost:6379/0"
 REDIS_TTL_DAYS: Final[int] = 7
@@ -340,6 +384,7 @@ FEISHU_SOURCE_NAME_MAP: Final[dict[str, str]] = {
     "helm": "HELM",
     "techempower": "TechEmpower",
     "dbengines": "DB-Engines",
+    "twitter": "Twitter",
 }
 
 # 字符串截断长度
