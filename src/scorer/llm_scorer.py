@@ -264,9 +264,17 @@ MGX是一个AI原生的多智能体协作框架（Vibe Coding），专注以下�
 【evaluation_metrics】评估指标列表（数组，与metrics字段相同）
 - 为了兼容性，与metrics字段保持一致
 
+=== 写作风格要求（新增） ===
+- 面向人阅读，少用“该候选项/该项目”这类正式套话，直接描述或用“这个项目”
+- 标题格式：`**活跃度 8/10**`，不要使用【】符号
+- 结构化：用Markdown列表拆分，突出“✅ 优势 / ⚠️ 需要注意 / 💡 建议”
+- 短段落：每个要点≤2-3行，<100字，重要数字/结论加粗
+- 必须指出风险/不足，禁止只写优点
+- 结尾一句给出“⭐ 是否纳入/优先级”简短结论
+
 === 第6部分：综合评分与推荐逻辑 ===
 
-【综合推理 overall_reasoning】（≥50字符）
+【综合推理 overall_reasoning】（≥200字符）
 基于5维评分，给出总体推荐意见：
 - 如果 总分≥6.5 且 relevance_score≥7：强烈推荐纳入MGX
 - 如果 总分≥6.0 且 relevance_score≥5：推荐纳入，但需优先级排序
@@ -276,7 +284,7 @@ MGX是一个AI原生的多智能体协作框架（Vibe Coding），专注以下�
 【推理字数验证】
 - activity_reasoning + reproducibility_reasoning + license_reasoning + novelty_reasoning + relevance_reasoning ≥ 750字符
 - backend_mgx_reasoning + backend_engineering_reasoning ≥ 400字符（仅后端）
-- overall_reasoning ≥ 50字符
+- overall_reasoning ≥ 200字符
 - **总推理字数必须 ≥1200字符（非后端Benchmark至少800字符）**
 
 === 第7部分：JSON输出格式 ===
@@ -298,7 +306,7 @@ MGX是一个AI原生的多智能体协作框架（Vibe Coding），专注以下�
   "backend_mgx_reasoning": "string",  // ≥200字符，非后端填空字符串""
   "backend_engineering_value": float,  // 0-10，非后端填0.0
   "backend_engineering_reasoning": "string",  // ≥200字符，非后端填空字符串""
-  "overall_reasoning": "string",  // ≥50字符
+  "overall_reasoning": "string",  // ≥200字符
   "task_domain": "string",  // 必填，不能是null
   "metrics": ["string"],  // 数组，可以为空[]
   "baselines": ["string"],  // 数组，可以为空[]
@@ -350,7 +358,7 @@ MGX是一个AI原生的多智能体协作框架（Vibe Coding），专注以下�
 - [ ] novelty_reasoning ≥ 150字符
 - [ ] relevance_reasoning ≥ 150字符
 - [ ] 如果是后端Benchmark: backend_mgx_reasoning ≥ 200字符, backend_engineering_reasoning ≥ 200字符
-- [ ] overall_reasoning ≥ 50字符
+- [ ] overall_reasoning ≥ 200字符
 - [ ] task_domain不是null，从预定义列表中选择
 - [ ] institution不是null（可以是"Unknown"）
 - [ ] task_type不是null（可以是"Other"）
@@ -359,15 +367,24 @@ MGX是一个AI原生的多智能体协作框架（Vibe Coding），专注以下�
 - [ ] JSON严格符合Schema，没有多余字段
 - [ ] JSON可以被标准解析器解析（没有语法错误）
 
-【PDF深度内容 (Phase 8)】
-> Evaluation部分摘要 (2000字):
+【PDF深度内容 (Phase PDF Enhancement)】
+> Introduction部分摘要 (2000字):
+{introduction_summary}
+
+> Method/Approach部分摘要 (3000字):
+{method_summary}
+
+> Evaluation/Experiments部分摘要 (3000字):
 {evaluation_summary}
 
-> Dataset部分摘要 (1000字):
+> Dataset/Data部分摘要 (2000字):
 {dataset_summary}
 
-> Baselines部分摘要 (1000字):
+> Baselines/Related Work部分摘要 (2000字):
 {baselines_summary}
+
+> Conclusion/Discussion部分摘要 (2000字):
+{conclusion_summary}
 
 【原始提取数据 (采集器粗提取)】
 - 原始指标: {raw_metrics}
@@ -533,9 +550,12 @@ class LLMScorer:
 
         # 提取PDF增强内容
         raw_metadata = candidate.raw_metadata or {}
+        introduction_summary = raw_metadata.get("introduction_summary") or "未提供（论文无Introduction章节或PDF解析失败）"
+        method_summary = raw_metadata.get("method_summary") or "未提供（论文无Method章节或PDF解析失败）"
         evaluation_summary = raw_metadata.get("evaluation_summary") or "未提供（论文无Evaluation章节或PDF解析失败）"
         dataset_summary = raw_metadata.get("dataset_summary") or "未提供（论文无Dataset章节或PDF解析失败）"
         baselines_summary = raw_metadata.get("baselines_summary") or "未提供（论文无Baselines章节或PDF解析失败）"
+        conclusion_summary = raw_metadata.get("conclusion_summary") or "未提供（论文无Conclusion章节或PDF解析失败）"
 
         # 原始提取数据
         raw_metrics = ", ".join(candidate.raw_metrics or []) if candidate.raw_metrics else "未提取"
@@ -558,9 +578,12 @@ class LLMScorer:
             paper_url=candidate.paper_url or "未提供",
             license_type=candidate.license_type or "未知",
             task_type=candidate.task_type or "未识别",
+            introduction_summary=introduction_summary,
+            method_summary=method_summary,
             evaluation_summary=evaluation_summary,
             dataset_summary=dataset_summary,
             baselines_summary=baselines_summary,
+            conclusion_summary=conclusion_summary,
             raw_metrics=raw_metrics,
             raw_baselines=raw_baselines,
             raw_authors=raw_authors,
@@ -590,7 +613,7 @@ class LLMScorer:
                     "【关键硬性要求——违反任意一条将视为失败】\n"
                     "1. activity/reproducibility/license/novelty/relevance_reasoning 各≥150字符（建议≥180字符）\n"
                     "2. 若 backend_mgx_relevance 或 backend_engineering_value > 0，则对应的 backend_*_reasoning 各≥200字符；否则可留空字符串\n"
-                    "3. overall_reasoning ≥ 50字符，需要总结推荐意见、优势与风险\n"
+                    "3. overall_reasoning ≥ 200字符，需要总结推荐意见、优势与风险\n"
                     "4. 总推理字数≥1200字符（即便无后端字段，也需通过展开细节满足要求）\n\n"
                     "【如何保证字符要求】\n"
                     "- 提供具体数据（GitHub stars、提交时间、PR/Issue数量、算力需求等）并展开论述\n"
@@ -644,6 +667,7 @@ class LLMScorer:
                 )
                 raise
 
+            # 检查总推理长度，不足则尝试自愈纠偏
             total_reasoning_length = (
                 len(extraction.activity_reasoning)
                 + len(extraction.reproducibility_reasoning)
@@ -654,10 +678,38 @@ class LLMScorer:
                 + len(extraction.backend_engineering_reasoning)
                 + len(extraction.overall_reasoning)
             )
+            if (
+                total_reasoning_length < 1200
+                and repair_attempt < constants.LLM_SELF_HEAL_MAX_ATTEMPTS
+            ):
+                repair_attempt += 1
+                shortage = 1200 - total_reasoning_length
+                fix_prompt = (
+                    "上一次JSON输出的推理总字数不足："
+                    f"当前{total_reasoning_length}字符，要求≥1200字符（差{shortage}字符）。\n\n"
+                    "请保留所有字段并重新输出完整JSON，通过以下方式扩写推理段落：\n"
+                    "1. 补充具体数据（GitHub stars、PR数量、提交时间、算力需求等）\n"
+                    "2. 展开论证结构：\"证据→分析→结论\"，每个推理段落至少2-3句话\n"
+                    "3. 明确指出潜在风险和不足，不要只写优点\n"
+                    "4. 如果信息不足，写明推断依据与局限性\n\n"
+                    "只输出符合Schema的纯JSON，不要添加额外解释或省略字段。"
+                )
+
+                messages.append({"role": "assistant", "content": content})
+                messages.append({"role": "user", "content": fix_prompt})
+                logger.warning(
+                    "推理总字数不足（%d < 1200），触发第%d次纠偏: %s",
+                    total_reasoning_length,
+                    repair_attempt,
+                    candidate.title[:50],
+                )
+                continue
+
             if total_reasoning_length < 1200:
                 logger.warning(
-                    "推理总字数不足: %d < 1200，候选：%s",
+                    "推理总字数不足: %d < 1200（已达最大重试%d次），候选：%s",
                     total_reasoning_length,
+                    constants.LLM_SELF_HEAL_MAX_ATTEMPTS,
                     candidate.title[:50],
                 )
 

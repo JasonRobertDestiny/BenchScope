@@ -94,3 +94,7 @@
 **待用户确认**:
 - 请在飞书表格中确认 `图片Key` 字段显示正确
 - 请在飞书通知卡片中确认首页预览图显示正常
+
+## 8. 补充说明（Phase PDF Enhancement）
+- 新增六章节提取（Introduction/Method/Evaluation/Dataset/Baselines/Conclusion），并同步更新评分Prompt占位符。
+- 初步本地测试显示个别论文缺少 Method/Conclusion 等章节时会为空，流程仅记录告警不阻塞；后续可通过关键词扩展或多页抽取进一步提升覆盖率。

@@ -21,6 +21,18 @@ ARXIV_PDF_HTTP_RETRY_DELAY_SECONDS: Final[float] = 5.0
 ARXIV_PDF_CACHE_DIR: Final[str] = "/tmp/arxiv_pdf_cache"  # PDF缓存目录
 ARXIV_IMAGE_CACHE_PREFIX: Final[str] = "arxiv_pdf_image:"
 ARXIV_IMAGE_CONVERT_DPI: Final[int] = 150  # pdf2image渲染DPI
+PDF_SECTION_P1_CONFIGS: Final[list[tuple[str, list[str], int]]] = [
+    ("introduction", ["introduction", "background", "motivation"], 2000),
+    ("method", ["method", "approach", "methodology", "design", "framework"], 3000),
+    ("evaluation", ["evaluation", "experiments", "results", "performance"], 3000),
+    ("dataset", ["dataset", "data", "benchmark", "corpus"], 2000),
+]
+PDF_SECTION_P2_CONFIGS: Final[list[tuple[str, list[str], int]]] = [
+    ("baselines", ["baselines", "comparison", "related work", "prior work"], 2000),
+    ("conclusion", ["conclusion", "discussion", "future work", "summary"], 2000),
+]
+PDF_MIN_P1_SECTIONS: Final[int] = 2
+PDF_MIN_P2_SECTIONS: Final[int] = 1
 
 # ---- Collector 配置 ----
 ARXIV_MAX_RESULTS: Final[int] = 50
@@ -361,7 +373,7 @@ LLM_MAX_RETRIES: Final[int] = 3
 LLM_COMPLETION_MAX_TOKENS: Final[int] = 2000  # 提高max_tokens确保评分依据完整详细
 LLM_REASONING_MIN_CHARS: Final[int] = 150  # 五维推理字段的最小字符数
 LLM_BACKEND_REASONING_MIN_CHARS: Final[int] = 200  # 后端专项推理的最小字符数
-LLM_OVERALL_REASONING_MIN_CHARS: Final[int] = 50  # overall_reasoning的最小字符数
+LLM_OVERALL_REASONING_MIN_CHARS: Final[int] = 200  # overall_reasoning的最小字符数（人性化强化）
 LLM_SELF_HEAL_MAX_ATTEMPTS: Final[int] = 2  # LLM输出字符不足时的自动纠偏重试次数
 SCORE_CONCURRENCY: Final[int] = 50  # GPT-4o速率限制高，充分利用并发能力
 REDIS_DEFAULT_URL: Final[str] = "redis://localhost:6379/0"

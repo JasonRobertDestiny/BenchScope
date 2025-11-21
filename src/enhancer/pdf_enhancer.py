@@ -50,6 +50,9 @@ class PDFContent:
     evaluation_summary: Optional[str] = None  # Evaluation 部分摘要（最多 2000 字）
     dataset_summary: Optional[str] = None  # Dataset 部分摘要（最多 1000 字）
     baselines_summary: Optional[str] = None  # Baselines 部分摘要（最多 1000 字）
+    introduction_summary: Optional[str] = None  # 引言摘要（最多 2000 字）
+    method_summary: Optional[str] = None  # 方法/框架摘要（最多 3000 字）
+    conclusion_summary: Optional[str] = None  # 结论/讨论摘要（最多 2000 字）
 
 
 class PDFEnhancer:
@@ -267,21 +270,54 @@ class PDFEnhancer:
             if name:
                 authors_affiliations.append((name, affiliation))
 
+        introduction_summary = self._extract_section_summary(
+            sections,
+            keywords=constants.PDF_SECTION_P1_CONFIGS[0][1],
+            max_len=constants.PDF_SECTION_P1_CONFIGS[0][2],
+        )
+        method_summary = self._extract_section_summary(
+            sections,
+            keywords=constants.PDF_SECTION_P1_CONFIGS[1][1],
+            max_len=constants.PDF_SECTION_P1_CONFIGS[1][2],
+        )
         evaluation_summary = self._extract_section_summary(
             sections,
-            keywords=["evaluation", "experiments", "results", "performance"],
-            max_len=2000,
+            keywords=constants.PDF_SECTION_P1_CONFIGS[2][1],
+            max_len=constants.PDF_SECTION_P1_CONFIGS[2][2],
         )
         dataset_summary = self._extract_section_summary(
             sections,
-            keywords=["dataset", "data", "benchmark", "corpus"],
-            max_len=1000,
+            keywords=constants.PDF_SECTION_P1_CONFIGS[3][1],
+            max_len=constants.PDF_SECTION_P1_CONFIGS[3][2],
         )
         baselines_summary = self._extract_section_summary(
             sections,
-            keywords=["baselines", "comparison", "related work", "prior work"],
-            max_len=1000,
+            keywords=constants.PDF_SECTION_P2_CONFIGS[0][1],
+            max_len=constants.PDF_SECTION_P2_CONFIGS[0][2],
         )
+        conclusion_summary = self._extract_section_summary(
+            sections,
+            keywords=constants.PDF_SECTION_P2_CONFIGS[1][1],
+            max_len=constants.PDF_SECTION_P2_CONFIGS[1][2],
+        )
+
+        # 至少提取2个P1核心章节，若不足仅警告不阻断流程
+        p1_count = sum(
+            1
+            for summary in (
+                introduction_summary,
+                method_summary,
+                evaluation_summary,
+                dataset_summary,
+            )
+            if summary
+        )
+        if p1_count < constants.PDF_MIN_P1_SECTIONS:
+            logger.warning(
+                "PDF核心章节不足: %d < %d (期望), 可能影响LLM推理",
+                p1_count,
+                constants.PDF_MIN_P1_SECTIONS,
+            )
 
         raw_references: Any = article_dict.get("references") or []
         references = [str(ref) for ref in raw_references]
@@ -295,6 +331,9 @@ class PDFEnhancer:
             evaluation_summary=evaluation_summary,
             dataset_summary=dataset_summary,
             baselines_summary=baselines_summary,
+            introduction_summary=introduction_summary,
+            method_summary=method_summary,
+            conclusion_summary=conclusion_summary,
         )
 
     async def _call_grobid_with_retry(self, pdf_path: Path) -> Optional[Dict[str, Any]]:
@@ -380,9 +419,14 @@ class PDFEnhancer:
 
         # 写入增强元数据（全部转为字符串，兼容 RawCandidate.raw_metadata 类型）
         metadata = dict(candidate.raw_metadata or {})
+        # Phase 8字段
         metadata["evaluation_summary"] = pdf_content.evaluation_summary or ""
         metadata["dataset_summary"] = pdf_content.dataset_summary or ""
         metadata["baselines_summary"] = pdf_content.baselines_summary or ""
+        # Phase PDF Enhancement新增字段
+        metadata["introduction_summary"] = pdf_content.introduction_summary or ""
+        metadata["method_summary"] = pdf_content.method_summary or ""
+        metadata["conclusion_summary"] = pdf_content.conclusion_summary or ""
         metadata["pdf_sections"] = ", ".join(pdf_content.sections.keys())
         metadata["pdf_references_count"] = str(len(pdf_content.references))
         candidate.raw_metadata = metadata
