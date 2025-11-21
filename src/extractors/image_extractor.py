@@ -56,9 +56,14 @@ class ImageExtractor:
         return await ImageExtractor.extract_og_image(repo_url)
 
     @staticmethod
-    async def extract_huggingface_image(model_id: str) -> Optional[str]:
-        """从HuggingFace模型卡片提取封面图（携带认证token）"""
-        model_url = f"https://huggingface.co/{model_id}"
+    async def extract_huggingface_image(dataset_id: str) -> Optional[str]:
+        """从HuggingFace数据集卡片提取封面图（携带认证token）
+
+        Args:
+            dataset_id: 数据集ID，格式为 'org/dataset-name'
+        """
+        # HuggingFace数据集URL格式：https://huggingface.co/datasets/{id}
+        dataset_url = f"https://huggingface.co/datasets/{dataset_id}"
 
         # 从配置获取HuggingFace token
         settings = get_settings()
@@ -67,7 +72,7 @@ class ImageExtractor:
             extra_headers["Authorization"] = f"Bearer {settings.sources.huggingface.token}"
 
         return await ImageExtractor.extract_og_image(
-            model_url, extra_headers=extra_headers
+            dataset_url, extra_headers=extra_headers
         )
 
     @staticmethod
