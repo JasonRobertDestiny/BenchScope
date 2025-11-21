@@ -277,6 +277,7 @@ class FeishuNotifier:
             )
 
         elements = []
+        # 如果有飞书image_key，在卡片中显示图片
         if candidate.hero_image_key:
             elements.append(
                 {

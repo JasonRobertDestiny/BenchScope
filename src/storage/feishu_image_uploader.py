@@ -164,8 +164,13 @@ class FeishuImageUploader:
                 resp = await client.post(
                     self.IMAGE_UPLOAD_API, headers=headers, files=files, data=data
                 )
-                resp.raise_for_status()
+
+                # 打印飞书API返回信息（调试用）
                 result = resp.json()
+                if resp.status_code != 200:
+                    logger.error("飞书API返回错误 (HTTP %d): %s", resp.status_code, result)
+
+                resp.raise_for_status()
 
             if result.get("code") != 0:
                 logger.error("飞书图片上传失败: %s", result)

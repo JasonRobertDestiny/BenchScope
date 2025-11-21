@@ -63,8 +63,8 @@ class ImageExtractor:
         # 从配置获取HuggingFace token
         settings = get_settings()
         extra_headers = {}
-        if settings.huggingface.token:
-            extra_headers["Authorization"] = f"Bearer {settings.huggingface.token}"
+        if settings.sources.huggingface.token:
+            extra_headers["Authorization"] = f"Bearer {settings.sources.huggingface.token}"
 
         return await ImageExtractor.extract_og_image(
             model_url, extra_headers=extra_headers

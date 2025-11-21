@@ -235,7 +235,7 @@ async def main() -> None:
                 success_count += 1
         except Exception as exc:  # noqa: BLE001
             logger.warning("图片上传失败: %s | %s", candidate.title[:50], exc)
-    logger.info("图片上传完成: %d/%d", success_count, len(upload_targets))
+    logger.info("图片上传完成: %d/%d 成功\n", success_count, len(upload_targets))
 
     # Step 6: 存储入库
     logger.info("[6/7] 存储入库...")

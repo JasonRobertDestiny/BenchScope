@@ -407,7 +407,7 @@ FEISHU_SOURCE_NAME_MAP: Final[dict[str, str]] = {
 }
 
 # ---- 图片处理配置 ----
-IMAGE_MIN_SIZE_BYTES: Final[int] = 50 * 1024  # 50KB下限，过滤无效小图
+IMAGE_MIN_SIZE_BYTES: Final[int] = 30 * 1024  # 30KB下限（GitHub og:image约40KB）
 IMAGE_MAX_SIZE_BYTES: Final[int] = 5 * 1024 * 1024  # 5MB上限，避免大文件拖慢
 IMAGE_MIN_WIDTH: Final[int] = 300  # 最小宽度限制，过滤徽标/小图标
 IMAGE_MIN_HEIGHT: Final[int] = 200
