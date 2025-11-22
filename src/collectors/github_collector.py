@@ -119,7 +119,8 @@ class GitHubCollector:
             datetime.now(timezone.utc) - timedelta(days=self.lookback_days)
         ).strftime("%Y-%m-%d")
         params = {
-            "q": f"{topic} benchmark in:name,description,readme pushed:>={lookback_date}",
+            # 使用创建时间筛选，避免老仓库因新commit被误认为新Benchmark
+            "q": f"{topic} benchmark in:name,description,readme created:>={lookback_date}",
             "sort": "stars",
             "order": "desc",
             "per_page": self.per_page,

@@ -8,7 +8,7 @@
 arxiv:
   enabled: true
   max_results: 100     # 增加到100条，确保不漏高质量论文
-  lookback_hours: 720  # 30天窗口（关注质量而非时效性）
+  lookback_hours: 168  # 7天窗口，提升新鲜度，减少重复
   timeout_seconds: 20  # 增大超时，适应复杂查询
   max_retries: 2       # 减少重试次数，避免长时间阻塞
 
@@ -219,7 +219,7 @@ huggingface:
 
   min_downloads: 100
   max_results: 50
-  lookback_days: 14
+  lookback_days: 7    # 7天窗口，提高新鲜度
 
 # ============================================================
 # 团队线索 (Internal Sources)

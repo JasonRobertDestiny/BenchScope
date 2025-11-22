@@ -466,3 +466,84 @@ class FeishuStorage:
 
         logger.info("飞书已存在URL数量: %d", len(existing_urls))
         return existing_urls
+
+    async def read_existing_records(self) -> List[dict[str, Any]]:
+        """查询飞书已存在的记录，含URL/发布时间/来源，用于时间窗去重"""
+
+        await self._ensure_access_token()
+
+        records: List[dict[str, Optional[datetime]]] = []
+        page_token: Optional[str] = None
+        url_field = self.FIELD_MAPPING["url"]
+        publish_field = self.FIELD_MAPPING["publish_date"]
+
+        async with httpx.AsyncClient(timeout=10) as client:
+            while True:
+                url = f"{self.base_url}/bitable/v1/apps/{self.settings.feishu.bitable_app_token}/tables/{self.settings.feishu.bitable_table_id}/records/search"
+
+                payload: Dict[str, Any] = {"page_size": 500}
+                if page_token:
+                    payload["page_token"] = page_token
+
+                resp = await self._request_with_retry(
+                    client,
+                    "POST",
+                    url,
+                    headers=self._auth_header(),
+                    json=payload,
+                )
+                resp.raise_for_status()
+                data = resp.json()
+
+                if data.get("code") != 0:
+                    raise FeishuAPIError(f"飞书查询失败: {data}")
+
+                items = data.get("data", {}).get("items", [])
+
+                for item in items:
+                    fields = item.get("fields", {})
+                    url_obj = fields.get(url_field)
+                    publish_raw = fields.get(publish_field)
+
+                    # URL字段兼容两种格式
+                    if isinstance(url_obj, dict):
+                        url_value = url_obj.get("link")
+                    elif isinstance(url_obj, str):
+                        url_value = url_obj
+                    else:
+                        url_value = None
+
+                    publish_date: Optional[datetime] = None
+                    if isinstance(publish_raw, (int, float)):
+                        # 飞书存的是毫秒时间戳
+                        publish_date = datetime.fromtimestamp(publish_raw / 1000)
+                    elif isinstance(publish_raw, str) and publish_raw:
+                        try:
+                            publish_date = datetime.fromisoformat(
+                                publish_raw.replace("Z", "+00:00")
+                            )
+                        except ValueError:
+                            logger.debug("无法解析发布时间: %s", publish_raw)
+
+                    if publish_date:
+                        publish_date = publish_date.replace(tzinfo=None)
+
+                    if url_value:
+                        source_field = self.FIELD_MAPPING.get("source", "来源")
+                        source_value = fields.get(source_field, "default")
+                        record_item: dict[str, Any] = {
+                            "url": str(url_value),
+                            "publish_date": publish_date,
+                            "source": str(source_value),
+                        }
+                        records.append(record_item)
+
+                has_more = data.get("data", {}).get("has_more", False)
+                if not has_more:
+                    break
+                page_token = data.get("data", {}).get("page_token")
+                if not page_token:
+                    break
+
+        logger.info("飞书历史记录读取完成: %d条", len(records))
+        return records

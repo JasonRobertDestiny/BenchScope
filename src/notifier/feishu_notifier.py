@@ -49,6 +49,7 @@ class FeishuNotifier:
         # 分层处理
         high_priority = [c for c in qualified if c.priority == "high"]
         medium_priority = [c for c in qualified if c.priority == "medium"]
+        low_priority = [c for c in qualified if c.priority == "low"]
 
         # 1. 推送所有高优先级卡片
         for candidate in high_priority:
@@ -57,7 +58,7 @@ class FeishuNotifier:
 
         # 2. 推送中优先级摘要 (新增)
         if medium_priority:
-            await self._send_medium_priority_summary(medium_priority)
+            await self._send_medium_priority_summary(medium_priority, low_priority)
             await asyncio.sleep(constants.FEISHU_RATE_LIMIT_DELAY)
 
         # 3. 推送统计摘要卡片 (支持markdown)
@@ -96,8 +97,48 @@ class FeishuNotifier:
         normalized = fallback.lower()
         return constants.FEISHU_SOURCE_NAME_MAP.get(normalized, fallback.title())
 
+    @staticmethod
+    def _format_institution(candidate: ScoredCandidate) -> str:
+        """格式化机构/作者信息，保持卡片信息完整"""
+
+        # GitHub通常无机构信息，避免展示“机构: 未知”
+        if candidate.source == "github" and not candidate.raw_institutions:
+            return ""
+
+        # 优先使用原始机构字段（论文类数据更可靠）
+        if candidate.raw_institutions:
+            institutions = candidate.raw_institutions
+            if len(institutions) > 50:
+                institutions = institutions[:47] + "..."
+            return f"机构: {institutions}"
+
+        # 退化使用作者列表的前两位，避免过长
+        if candidate.authors:
+            if len(candidate.authors) == 1:
+                author_text = candidate.authors[0]
+            elif len(candidate.authors) == 2:
+                author_text = f"{candidate.authors[0]}, {candidate.authors[1]}"
+            else:
+                author_text = f"{candidate.authors[0]}, {candidate.authors[1]} et al."
+            if len(author_text) > 50:
+                author_text = author_text[:47] + "..."
+            return f"作者: {author_text}"
+
+        # 无信息时返回占位符
+        return "机构: 未知"
+
+    @staticmethod
+    def _format_stars(stars: Optional[int]) -> str:
+        """格式化GitHub stars数，避免卡片溢出"""
+
+        if not stars:
+            return "Stars: --"
+        if stars >= 1000:
+            return f"Stars: {stars/1000:.1f}k"
+        return f"Stars: {stars}"
+
     async def _send_medium_priority_summary(
-        self, candidates: List[ScoredCandidate]
+        self, candidates: List[ScoredCandidate], low_candidates: Optional[List[ScoredCandidate]] = None
     ) -> None:
         """发送中优先级候选摘要卡片 - 专业排版版"""
         top_limit = constants.FEISHU_MEDIUM_TOPK
@@ -118,6 +159,23 @@ class FeishuNotifier:
             f"**Top {min(top_limit, len(top_candidates))} 推荐**\n\n"
         )
 
+        # 每来源补齐至少1条，提升多样性（包含低优先级候选池）
+        per_source_limit = constants.FEISHU_PER_SOURCE_TOPK
+        per_source_picks: dict[str, ScoredCandidate] = {}
+        if per_source_limit > 0:
+            pool = candidates + (low_candidates or [])
+            sorted_by_source = sorted(
+                pool, key=lambda x: x.total_score, reverse=True
+            )
+            for cand in sorted_by_source:
+                src = (cand.source or "unknown").lower()
+                if src not in per_source_picks and len(per_source_picks) < len(
+                    constants.FEISHU_SOURCE_NAME_MAP
+                ):
+                    per_source_picks[src] = cand
+                if len(per_source_picks) >= len(constants.FEISHU_SOURCE_NAME_MAP):
+                    break
+
         for i, c in enumerate(top_candidates, 1):
             title = (
                 c.title[: constants.TITLE_TRUNCATE_MEDIUM] + "..."
@@ -125,13 +183,62 @@ class FeishuNotifier:
                 else c.title
             )
             source_name = self._format_source_name(c.source)
+            institution = self._format_institution(c)
+            stars_text = self._format_stars(c.github_stars) if c.source == "github" else ""
+
+            info_parts = []
+            if institution:
+                info_parts.append(institution)
+            if stars_text:
+                info_parts.append(stars_text)
+            info_parts.append(f"[查看详情]({c.url})")
+            info_line = "  │  ".join(info_parts)
 
             content += (
                 f"**{i}. {title}**\n"
                 f"   来源: {source_name}  │  评分: {c.total_score:.1f}  │  "
-                f"活跃度: {c.activity_score:.1f}  │  可复现性: {c.reproducibility_score:.1f}\n"
-                f"   [查看详情]({c.url})\n\n"
+                f"活跃度: {c.activity_score:.1f}  │  可复现性: {c.reproducibility_score:.1f}  │  "
+                f"MGX适配度: {c.relevance_score:.1f}\n"
+                f"   {info_line}\n\n"
             )
+
+        # 按来源精选分区
+        if per_source_picks:
+            content += "**按来源精选**\n\n"
+            for src, cand in per_source_picks.items():
+                title = (
+                    cand.title[: constants.TITLE_TRUNCATE_MEDIUM] + "..."
+                    if len(cand.title) > constants.TITLE_TRUNCATE_MEDIUM
+                    else cand.title
+                )
+                source_name = self._format_source_name(cand.source)
+                institution = self._format_institution(cand)
+                stars_text = (
+                    self._format_stars(cand.github_stars)
+                    if cand.source == "github"
+                    else ""
+                )
+                info_parts = []
+                if institution:
+                    info_parts.append(institution)
+                if stars_text:
+                    info_parts.append(stars_text)
+                info_parts.append(f"[查看详情]({cand.url})")
+                info_line = "  │  ".join(info_parts)
+                content += (
+                    f"- {source_name}: {title} （评分{cand.total_score:.1f}，MGX {cand.relevance_score:.1f}）\n"
+                    f"  {info_line}\n"
+                )
+            content += "\n"
+
+        # 低优先精选分区（papers/datasets）
+        if constants.FEISHU_LOW_PICK_ENABLED:
+            low_section = self._build_low_pick_section(
+                low_candidates if low_candidates is not None else candidates
+            )
+            if low_section:
+                content += "**Latest Papers / Datasets**\n\n"
+                content += low_section + "\n"
 
         if len(candidates) > top_limit:
             content += f"\n其余 {len(candidates)-top_limit} 条候选可在飞书表格查看\n"
@@ -165,6 +272,48 @@ class FeishuNotifier:
         }
 
         await self._send_webhook(card)
+
+    def _build_low_pick_section(self, candidates: List[ScoredCandidate]) -> str:
+        """从low队列挑选最新且相关的论文/数据集，保证曝光"""
+
+        picks: list[str] = []
+        per_source_limits = constants.FEISHU_LOW_PICK_PER_SOURCE
+
+        grouped: dict[str, list[ScoredCandidate]] = {}
+        for cand in candidates:
+            if cand.priority != "low":
+                continue
+            source = (cand.source or "unknown").lower()
+            if source not in per_source_limits:
+                continue
+            if cand.publish_date and (
+                datetime.now() - cand.publish_date
+            ).days > constants.PAPER_MAX_PUBLISH_DAYS_FOR_LOW_PICK:
+                continue
+            if cand.total_score < constants.PAPER_MIN_SCORE_FOR_LOW_PICK:
+                continue
+            if cand.relevance_score < constants.PAPER_MIN_RELEVANCE_FOR_LOW_PICK:
+                continue
+            grouped.setdefault(source, []).append(cand)
+
+        for source, items in grouped.items():
+            items = sorted(items, key=lambda x: x.total_score, reverse=True)
+            limit = per_source_limits.get(source, 0)
+            for cand in items[:limit]:
+                title = (
+                    cand.title[: constants.TITLE_TRUNCATE_MEDIUM] + "..."
+                    if len(cand.title) > constants.TITLE_TRUNCATE_MEDIUM
+                    else cand.title
+                )
+                source_name = self._format_source_name(cand.source)
+                date_str = (
+                    cand.publish_date.strftime("%Y-%m-%d") if cand.publish_date else "近期"
+                )
+                picks.append(
+                    f"- {source_name}: {title} （MGX {cand.relevance_score:.1f}, {date_str}） [查看详情]({cand.url})"
+                )
+
+        return "\n".join(picks)
 
     def _build_summary_card(
         self,
@@ -261,10 +410,24 @@ class FeishuNotifier:
                     "url": candidate.github_url,
                     "type": "default",
                 },
-            )
+        )
 
         # 构建卡片元素：标题 → 图片 → 内容
         title_content = f"**{candidate.title[:constants.TITLE_TRUNCATE_LONG]}**"
+
+        # 统一展示机构与Stars，保持与中优先级卡片一致
+        institution = self._format_institution(candidate)
+        stars_text = (
+            self._format_stars(candidate.github_stars)
+            if candidate.source == "github"
+            else ""
+        )
+        source_line_parts = [f"**来源**: {source_name}"]
+        if institution:
+            source_line_parts.append(institution)
+        if stars_text:
+            source_line_parts.append(stars_text)
+        source_line = "  |  ".join(source_line_parts)
 
         detail_content = (
             f"综合评分: **{candidate.total_score:.1f}** / 10  |  优先级: **{priority_label}**\n\n"
@@ -274,7 +437,7 @@ class FeishuNotifier:
             f"许可合规 {candidate.license_score:.1f}  |  "
             f"任务新颖性 {candidate.novelty_score:.1f}  |  "
             f"MGX适配度 {candidate.relevance_score:.1f}\n\n"
-            f"**来源**: {source_name}\n\n"
+            f"{source_line}\n\n"
             f"**评分依据**\n{candidate.reasoning}"
         )
 

@@ -67,3 +67,11 @@ class StorageManager:
         except Exception as exc:  # noqa: BLE001
             logger.warning("⚠️  查询飞书失败,返回空集合: %s", exc)
             return set()
+
+    async def read_existing_records(self):
+        """读取已存在记录（含URL/发布日期/来源），用于时间窗去重"""
+        try:
+            return await self.feishu.read_existing_records()
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("⚠️  查询飞书记录失败,返回空列表: %s", exc)
+            return []

@@ -299,43 +299,98 @@ PREFILTER_MIN_GITHUB_STARS: Final[int] = 10
 PREFILTER_MIN_README_LENGTH: Final[int] = 500
 PREFILTER_RECENT_DAYS: Final[int] = 90
 PREFILTER_REQUIRED_KEYWORDS: Final[list[str]] = [
-    # P0 - 编程
+    # ====== Benchmark核心术语（通用） ======
+    "benchmark",
+    "benchmarking",
+    "evaluation",
+    "leaderboard",
+    "dataset",
+    "corpus",
+    "test set",
+    "test suite",
+    "testbed",
+    "baseline",
+    "validation",
+    "benchmark suite",
+    "benchmark collection",
+    # ====== Code相关 ======
     "code",
     "coding",
     "program",
     "programming",
     "software",
     "repository",
-    # P0 - Web/GUI
+    "code generation",
+    "code benchmark",
+    "execution benchmark",
+    # ====== Web/GUI ======
     "web",
     "browser",
     "gui",
     "ui",
     "automation",
-    # P1 - Agent
+    "web automation",
+    # ====== Agent/Tool Use ======
     "agent",
     "multi-agent",
     "tool",
+    "tool use",
     "api",
     "workflow",
-    # Phase 2 - 性能/后端扩展
-    "performance",
-    "benchmark",
-    "framework",
+    "planning",
+    "agent benchmark",
+    # ====== Backend/Performance ======
+    "backend",
     "database",
-    "latency",
-    "throughput",
-    "optimization",
-    "http",
+    "sql",
+    "microservices",
+    "system-design",
+    "performance",
+    "framework",
     "server",
-    "service",
-    "endpoint",
-    "query",
-    "storage",
-    # P2 - 推理
+    "software benchmark",
+    # ====== Reasoning（新增）======
     "reasoning",
-    "math",
     "logic",
+    "logical reasoning",
+    "chain-of-thought",
+    "cot",
+    "reasoning benchmark",
+    "math",
+    "mathematics",
+    "mathematical reasoning",
+    "problem solving",
+    # ====== Knowledge（新增）======
+    "knowledge",
+    "question answering",
+    "qa",
+    "knowledge graph",
+    "fact checking",
+    "factual",
+    "world knowledge",
+    # ====== Multimodal（新增）======
+    "multimodal",
+    "vision-language",
+    "image-text",
+    "visual",
+    "vision",
+    "video",
+    "audio",
+    "speech",
+    # ====== Language Understanding（新增）======
+    "language",
+    "nlp",
+    "natural language",
+    "text",
+    "linguistic",
+    "language understanding",
+    "comprehension",
+    "reading comprehension",
+    # ====== Task相关（新增）======
+    "task",
+    "tasks",
+    "challenge",
+    "competition",
 ]
 PREFILTER_EXCLUDED_KEYWORDS: Final[list[str]] = [
     # 纯NLP/多模态
@@ -374,6 +429,7 @@ LLM_COMPLETION_MAX_TOKENS: Final[int] = 2000  # 提高max_tokens确保评分依�
 LLM_REASONING_MIN_CHARS: Final[int] = 150  # 五维推理字段的最小字符数
 LLM_BACKEND_REASONING_MIN_CHARS: Final[int] = 200  # 后端专项推理的最小字符数
 LLM_OVERALL_REASONING_MIN_CHARS: Final[int] = 200  # overall_reasoning的最小字符数（人性化强化）
+LLM_TOTAL_REASONING_MIN_CHARS: Final[int] = 1000  # 总推理最少字数（从1200降至1000，避免短PDF频繁触发纠偏）
 LLM_SELF_HEAL_MAX_ATTEMPTS: Final[int] = 2  # LLM输出字符不足时的自动纠偏重试次数
 SCORE_CONCURRENCY: Final[int] = 50  # GPT-4o速率限制高，充分利用并发能力
 REDIS_DEFAULT_URL: Final[str] = "redis://localhost:6379/0"
@@ -480,3 +536,32 @@ DATASET_SIZE_MULTIPLIERS: Final[dict[str, int]] = {
     "k": 1_000,
     "m": 1_000_000,
 }
+
+# ============================================================
+# 去重配置
+# ============================================================
+# 去重时仅对比最近N天内的已入库记录，降低新数据被老记录覆盖的概率
+DEDUP_LOOKBACK_DAYS: Final[int] = 14
+# 按来源定制去重窗口，未命中则使用default
+DEDUP_LOOKBACK_DAYS_BY_SOURCE: Final[dict[str, int]] = {
+    "arxiv": 3,  # arXiv仅对比近3天，避免与7天采集窗口完全重叠
+    "default": DEDUP_LOOKBACK_DAYS,
+}
+
+# ============================================================
+# 推送多样性与低优先精选配置
+# ============================================================
+FEISHU_PER_SOURCE_TOPK: Final[int] = 1  # 每个来源至少推送1条（中优摘要补齐）
+FEISHU_LOW_PICK_ENABLED: Final[bool] = True  # 是否开启低优先精选分区
+FEISHU_LOW_PICK_PER_SOURCE: Final[dict[str, int]] = {
+    "arxiv": 2,
+    "huggingface": 1,
+    "helm": 1,
+}
+# 论文来源评分折扣（后处理，用于平衡活跃度/复现性偏低）
+PAPER_ACTIVITY_DISCOUNT: Final[float] = 0.6
+PAPER_REPRODUCIBILITY_DISCOUNT: Final[float] = 0.7
+PAPER_MGX_BONUS: Final[float] = 0.1  # MGX适配度加权
+PAPER_MIN_SCORE_FOR_LOW_PICK: Final[float] = 5.5  # 放宽门槛，避免全被过滤
+PAPER_MIN_RELEVANCE_FOR_LOW_PICK: Final[float] = 5.5
+PAPER_MAX_PUBLISH_DAYS_FOR_LOW_PICK: Final[int] = 10  # 放宽到10天，保留更多最新论文

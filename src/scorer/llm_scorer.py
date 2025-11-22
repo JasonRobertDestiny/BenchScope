@@ -285,7 +285,7 @@ MGX是一个AI原生的多智能体协作框架（Vibe Coding），专注以下�
 - activity_reasoning + reproducibility_reasoning + license_reasoning + novelty_reasoning + relevance_reasoning ≥ 750字符
 - backend_mgx_reasoning + backend_engineering_reasoning ≥ 400字符（仅后端）
 - overall_reasoning ≥ 200字符
-- **总推理字数必须 ≥1200字符（非后端Benchmark至少800字符）**
+- **总推理字数必须 ≥1000字符（非后端Benchmark至少800字符）**
 
 === 第7部分：JSON输出格式 ===
 
@@ -614,7 +614,7 @@ class LLMScorer:
                     "1. activity/reproducibility/license/novelty/relevance_reasoning 各≥150字符（建议≥180字符）\n"
                     "2. 若 backend_mgx_relevance 或 backend_engineering_value > 0，则对应的 backend_*_reasoning 各≥200字符；否则可留空字符串\n"
                     "3. overall_reasoning ≥ 200字符，需要总结推荐意见、优势与风险\n"
-                    "4. 总推理字数≥1200字符（即便无后端字段，也需通过展开细节满足要求）\n\n"
+                    f"4. 总推理字数≥{constants.LLM_TOTAL_REASONING_MIN_CHARS}字符（即便无后端字段，也需通过展开细节满足要求）\n\n"
                     "【如何保证字符要求】\n"
                     "- 提供具体数据（GitHub stars、提交时间、PR/Issue数量、算力需求等）并展开论述\n"
                     "- 每个推理段落结构为“证据→分析→结论”，至少2-3句话\n"
@@ -678,15 +678,16 @@ class LLMScorer:
                 + len(extraction.backend_engineering_reasoning)
                 + len(extraction.overall_reasoning)
             )
+            min_total_chars = constants.LLM_TOTAL_REASONING_MIN_CHARS
             if (
-                total_reasoning_length < 1200
+                total_reasoning_length < min_total_chars
                 and repair_attempt < constants.LLM_SELF_HEAL_MAX_ATTEMPTS
             ):
                 repair_attempt += 1
-                shortage = 1200 - total_reasoning_length
+                shortage = min_total_chars - total_reasoning_length
                 fix_prompt = (
                     "上一次JSON输出的推理总字数不足："
-                    f"当前{total_reasoning_length}字符，要求≥1200字符（差{shortage}字符）。\n\n"
+                    f"当前{total_reasoning_length}字符，要求≥{min_total_chars}字符（差{shortage}字符）。\n\n"
                     "请保留所有字段并重新输出完整JSON，通过以下方式扩写推理段落：\n"
                     "1. 补充具体数据（GitHub stars、PR数量、提交时间、算力需求等）\n"
                     "2. 展开论证结构：\"证据→分析→结论\"，每个推理段落至少2-3句话\n"
@@ -698,17 +699,19 @@ class LLMScorer:
                 messages.append({"role": "assistant", "content": content})
                 messages.append({"role": "user", "content": fix_prompt})
                 logger.warning(
-                    "推理总字数不足（%d < 1200），触发第%d次纠偏: %s",
+                    "推理总字数不足（%d < %d），触发第%d次纠偏: %s",
                     total_reasoning_length,
+                    min_total_chars,
                     repair_attempt,
                     candidate.title[:50],
                 )
                 continue
 
-            if total_reasoning_length < 1200:
+            if total_reasoning_length < min_total_chars:
                 logger.warning(
-                    "推理总字数不足: %d < 1200（已达最大重试%d次），候选：%s",
+                    "推理总字数不足: %d < %d（已达最大重试%d次），候选：%s",
                     total_reasoning_length,
+                    min_total_chars,
                     constants.LLM_SELF_HEAL_MAX_ATTEMPTS,
                     candidate.title[:50],
                 )

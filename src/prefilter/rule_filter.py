@@ -13,7 +13,7 @@ from src.models import RawCandidate
 logger = logging.getLogger(__name__)
 
 
-TRUSTED_SOURCES: set[str] = {"techempower", "dbengines", "helm"}
+TRUSTED_SOURCES: set[str] = {"arxiv", "techempower", "dbengines", "helm"}
 
 
 def prefilter(candidate: RawCandidate) -> bool:
@@ -33,13 +33,20 @@ def prefilter_batch(candidates: List[RawCandidate]) -> List[RawCandidate]:
         return []
 
     reason_stats: Counter[str] = Counter()
+    source_stats: dict[str, dict[str, int]] = {}  # 按来源统计输入/输出
     filtered: List[RawCandidate] = []
 
     for candidate in candidates:
+        source = candidate.source
+        if source not in source_stats:
+            source_stats[source] = {"input": 0, "output": 0}
+        source_stats[source]["input"] += 1
+
         passed, reason = _prefilter_with_reason(candidate)
         reason_stats[reason] += 1
         if passed:
             filtered.append(candidate)
+            source_stats[source]["output"] += 1
 
     rate = 100 * (1 - len(filtered) / len(candidates))
     # 只输出被过滤的主要原因，避免日志过长
@@ -59,6 +66,21 @@ def prefilter_batch(candidates: List[RawCandidate]) -> List[RawCandidate]:
         rate,
         reason_text,
     )
+
+    # 输出按来源的通过统计，便于定位召回差异
+    if source_stats:
+        logger.info("===== 预筛选按来源统计 =====")
+        for source, stats in sorted(source_stats.items()):
+            pass_rate = (
+                stats["output"] / stats["input"] * 100 if stats["input"] else 0
+            )
+            logger.info(
+                "  %s: %d/%d (通过率%.1f%%)",
+                source.ljust(15),
+                stats["output"],
+                stats["input"],
+                pass_rate,
+            )
     return filtered
 
 

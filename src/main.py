@@ -7,8 +7,10 @@ import logging
 import os
 import subprocess
 import time
+from collections import Counter
+from datetime import datetime, timedelta
 from pathlib import Path
-from typing import List
+from typing import Any, List
 
 import httpx
 
@@ -21,6 +23,7 @@ from src.collectors import (
     TechEmpowerCollector,
     TwitterCollector,
 )
+from src.common import constants
 from src.config import Settings, get_settings
 from src.enhancer import PDFEnhancer
 from src.models import RawCandidate
@@ -181,15 +184,61 @@ async def main() -> None:
     if internal_dup_count > 0:
         logger.info("本次采集内部去重: 过滤%d条重复URL", internal_dup_count)
 
-    # 2. 与飞书已存在URL去重
+    # 2. 与飞书已存在URL去重（仅对比近N天记录，降低新鲜度损耗）
     storage = StorageManager()
-    existing_urls = await storage.get_existing_urls()
+    now = datetime.now()
+    existing_records: list[dict[str, Any]] = await storage.read_existing_records()
+    # 按来源应用不同的去重窗口
+    recent_urls_by_source: dict[str, set[str]] = {}
+    for record in existing_records:
+        publish_date = record.get("publish_date")
+        url_value = record.get("url")
+        source_value = record.get("source", "default")
+        if not isinstance(publish_date, datetime) or not url_value:
+            continue
+        window_days = constants.DEDUP_LOOKBACK_DAYS_BY_SOURCE.get(
+            source_value, constants.DEDUP_LOOKBACK_DAYS_BY_SOURCE["default"]
+        )
+        if publish_date >= now - timedelta(days=window_days):
+            recent_urls_by_source.setdefault(source_value, set()).add(url_value)
 
-    deduplicated = [c for c in internal_deduplicated if c.url not in existing_urls]
-    duplicate_count = len(internal_deduplicated) - len(deduplicated)
+    deduplicated: List[RawCandidate] = []
+    duplicate_count = 0
+    for c in internal_deduplicated:
+        window_days = constants.DEDUP_LOOKBACK_DAYS_BY_SOURCE.get(
+            c.source, constants.DEDUP_LOOKBACK_DAYS_BY_SOURCE["default"]
+        )
+        recent_urls = recent_urls_by_source.get(c.source, set())
+        if c.url in recent_urls:
+            duplicate_count += 1
+            continue
+        deduplicated.append(c)
+
     logger.info(
-        "去重完成: 过滤%d条重复,保留%d条新发现\n", duplicate_count, len(deduplicated)
+        "去重完成: 飞书总记录%d条, arXiv窗口%d天, 默认窗口%d天, 过滤%d条重复, 保留%d条新发现\n",
+        len(existing_records),
+        constants.DEDUP_LOOKBACK_DAYS_BY_SOURCE.get("arxiv"),
+        constants.DEDUP_LOOKBACK_DAYS_BY_SOURCE.get("default"),
+        duplicate_count,
+        len(deduplicated),
     )
+
+    # 按来源输出去重后的新发现，帮助观察来源多样性
+    source_counts = Counter(c.source for c in deduplicated)
+    if source_counts:
+        logger.info("===== 去重后按来源统计 =====")
+        for source, count in sorted(source_counts.items(), key=lambda x: -x[1]):
+            collected = sum(1 for c in internal_deduplicated if c.source == source)
+            dup_rate = (
+                (collected - count) / collected * 100 if collected else 0
+            )
+            logger.info(
+                "  %s: %d条新发现 / %d条采集 (去重率%.1f%%)",
+                source.ljust(15),
+                count,
+                collected,
+                dup_rate,
+            )
 
     if not deduplicated:
         logger.warning("去重后无新候选,流程终止")
