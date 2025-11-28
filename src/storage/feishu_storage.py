@@ -107,11 +107,18 @@ class FeishuStorage:
 
         raise FeishuAPIError("飞书请求重试仍失败") from last_error
 
-    async def save(self, candidates: List[ScoredCandidate]) -> None:
-        """批量写入飞书多维表格"""
+    async def save(self, candidates: List[ScoredCandidate]) -> List[ScoredCandidate]:
+        """批量写入飞书多维表格
+
+        Args:
+            candidates: 待写入的候选列表
+
+        Returns:
+            实际写入的候选列表（去重后），用于后续通知
+        """
 
         if not candidates:
-            return
+            return []
 
         await self._ensure_access_token()
         existing_urls = await self.get_existing_urls()
@@ -131,7 +138,7 @@ class FeishuStorage:
 
         if not deduped_candidates:
             logger.info("飞书去重后无新增记录，跳过写入")
-            return
+            return []
 
         async with httpx.AsyncClient(timeout=10) as client:
             for start in range(0, len(deduped_candidates), self.batch_size):
@@ -155,6 +162,8 @@ class FeishuStorage:
 
                 if start + self.batch_size < len(deduped_candidates):
                     await asyncio.sleep(self.rate_interval)
+
+        return deduped_candidates
 
     async def _batch_create_records(
         self, client: httpx.AsyncClient, records: List[dict]

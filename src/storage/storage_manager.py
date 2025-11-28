@@ -24,34 +24,44 @@ class StorageManager:
         self.feishu = feishu or FeishuStorage()
         self.sqlite = sqlite or SQLiteFallback()
 
-    async def save(self, candidates: List[ScoredCandidate]) -> None:
-        """主备存储策略"""
+    async def save(self, candidates: List[ScoredCandidate]) -> List[ScoredCandidate]:
+        """主备存储策略
+
+        Args:
+            candidates: 待写入的候选列表
+
+        Returns:
+            实际写入的候选列表（飞书去重后），用于后续通知
+        """
 
         if not candidates:
-            return
+            return []
 
         try:
-            await self.feishu.save(candidates)
-            logger.info("✅ 飞书存储成功: %d条", len(candidates))
+            actually_saved = await self.feishu.save(candidates)
+            logger.info("✅ 飞书存储成功: %d条 (新增%d条)", len(candidates), len(actually_saved))
+            return actually_saved
         except FeishuAPIError as exc:
             # access_token偶发缺失时自动刷新并重试一次，降低降级概率
             if "access_token不存在" in str(exc):
                 logger.warning("⚠️  飞书token缺失，尝试自动刷新后重试一次")
                 await self.feishu._ensure_access_token()
                 try:
-                    await self.feishu.save(candidates)
-                    logger.info("✅ 飞书存储重试成功: %d条", len(candidates))
-                    return
+                    actually_saved = await self.feishu.save(candidates)
+                    logger.info("✅ 飞书存储重试成功: %d条 (新增%d条)", len(candidates), len(actually_saved))
+                    return actually_saved
                 except Exception as retry_exc:  # noqa: BLE001
                     logger.warning("⚠️  飞书重试仍失败，将降级到SQLite: %s", retry_exc)
             else:
                 logger.warning("⚠️  飞书存储失败,降级到SQLite: %s", exc)
             await self.sqlite.save(candidates)
             logger.info("✅ SQLite备份成功: %d条", len(candidates))
+            return candidates  # SQLite降级时返回全部候选（无法去重）
         except Exception as exc:  # noqa: BLE001
             logger.warning("⚠️  飞书存储失败,降级到SQLite: %s", exc)
             await self.sqlite.save(candidates)
             logger.info("✅ SQLite备份成功: %d条", len(candidates))
+            return candidates  # SQLite降级时返回全部候选（无法去重）
 
     async def sync_from_sqlite(self) -> None:
         """将SQLite未同步记录回写到飞书"""

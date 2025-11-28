@@ -287,28 +287,36 @@ async def main() -> None:
 
     # Step 6: 存储入库
     logger.info("[6/7] 存储入库...")
-    await storage.save(scored)
+    actually_saved = await storage.save(scored)  # 获取实际写入的记录（去重后）
     await storage.sync_from_sqlite()
     await storage.cleanup()
-    logger.info("存储完成\n")
+    logger.info("存储完成: 新增%d条\n", len(actually_saved))
 
-    # Step 7: 飞书通知
+    # Step 7: 飞书通知（仅通知新增记录，避免重复推送）
     logger.info("[7/7] 飞书通知...")
     notifier = FeishuNotifier(settings=settings)
-    await notifier.notify(scored)
-    logger.info("通知完成\n")
+    if actually_saved:
+        await notifier.notify(actually_saved)  # 只通知新增的记录
+        logger.info("通知完成: %d条新增候选\n", len(actually_saved))
+    else:
+        logger.info("无新增候选，跳过通知\n")
 
-    high_priority = [c for c in scored if c.priority == "high"]
-    medium_priority = [c for c in scored if c.priority == "medium"]
-    avg_score = sum(c.total_score for c in scored) / len(scored) if scored else 0
+    # 从实际入库的记录统计优先级
+    high_priority = [c for c in actually_saved if c.priority == "high"]
+    medium_priority = [c for c in actually_saved if c.priority == "medium"]
+    avg_score = sum(c.total_score for c in actually_saved) / len(actually_saved) if actually_saved else 0
+
+    # 统计飞书去重跳过的记录数
+    skipped_count = len(scored) - len(actually_saved)
 
     logger.info("=" * 60)
     logger.info("BenchScope Phase 2 完成")
     logger.info("  采集: %d条", len(all_candidates))
-    logger.info("  去重: %d条新发现 (过滤%d条重复)", len(deduplicated), duplicate_count)
+    logger.info("  去重(Step1.5): %d条新发现 (过滤%d条)", len(deduplicated), duplicate_count)
     logger.info("  预筛选: %d条", len(filtered))
-    logger.info("  高优先级: %d条", len(high_priority))
-    logger.info("  中优先级: %d条", len(medium_priority))
+    logger.info("  评分: %d条", len(scored))
+    logger.info("  实际入库: %d条 (跳过%d条飞书已存在)", len(actually_saved), skipped_count)
+    logger.info("  推送: 高%d条, 中%d条", len(high_priority), len(medium_priority))
     logger.info("  平均分: %.2f/10", avg_score)
     logger.info("=" * 60)
 
