@@ -49,9 +49,59 @@ def _looks_like_algo_paper(candidate: RawCandidate) -> bool:
 
     text = f"{candidate.title} {(candidate.abstract or '')}".lower()
 
-    has_algo_phrase = _contains_any(text, constants.ALGO_METHOD_PHRASES)
+    has_algo_phrase = _contains_any(
+        text, constants.ALGO_METHOD_PHRASES_EXTENDED
+    )
     has_benchmark_signal = _contains_any(text, constants.BENCHMARK_DATASET_KEYWORDS)
     return has_algo_phrase and not has_benchmark_signal
+
+
+def _looks_like_technical_report(candidate: RawCandidate) -> bool:
+    """检测技术报告/模型发布论文（非Benchmark）。"""
+
+    title_lower = (candidate.title or "").lower()
+    has_tech_report_pattern = _contains_any(
+        title_lower, constants.TECHNICAL_REPORT_PATTERNS
+    )
+    has_model_name = _contains_any(title_lower, constants.MODEL_RELEASE_KEYWORDS)
+    has_benchmark_signal = _contains_any(
+        title_lower, constants.BENCHMARK_TITLE_SIGNALS
+    )
+
+    if has_tech_report_pattern and not has_benchmark_signal:
+        return True
+
+    if has_model_name and "technical report" in title_lower and not has_benchmark_signal:
+        return True
+
+    return False
+
+
+def _looks_like_non_mgx_application(candidate: RawCandidate) -> bool:
+    """检测非MGX相关的应用领域论文。"""
+
+    text = f"{candidate.title} {(candidate.abstract or '')}".lower()
+    has_non_mgx_app = _contains_any(text, constants.NON_MGX_APPLICATION_KEYWORDS)
+    if not has_non_mgx_app:
+        return False
+
+    mgx_core_keywords = [
+        "code generation",
+        "code completion",
+        "code review",
+        "multi-agent",
+        "agent collaboration",
+        "tool use",
+        "api call",
+        "function call",
+        "web automation",
+        "gui automation",
+        "browser automation",
+        "software engineering",
+        "programming",
+    ]
+    has_mgx_signal = _contains_any(text, mgx_core_keywords)
+    return not has_mgx_signal
 
 
 def prefilter(candidate: RawCandidate) -> bool:
@@ -173,6 +223,16 @@ def _prefilter_with_reason(candidate: RawCandidate) -> tuple[bool, str]:
     if candidate.source == "arxiv" and _looks_like_algo_paper(candidate):
         logger.debug("过滤: 算法/系统方法论文 - %s", candidate.title)
         return False, "algo_paper"
+
+    # 技术报告/模型发布论文过滤（arXiv等论文源）
+    if candidate.source == "arxiv" and _looks_like_technical_report(candidate):
+        logger.debug("过滤: 技术报告/模型发布论文 - %s", candidate.title)
+        return False, "tech_report"
+
+    # 非MGX应用领域论文过滤（arXiv等论文源）
+    if candidate.source == "arxiv" and _looks_like_non_mgx_application(candidate):
+        logger.debug("过滤: 非MGX应用领域论文 - %s", candidate.title)
+        return False, "non_mgx_app"
 
     logger.debug(
         "✅ 通过预筛选: %s (source=%s, stars=%s)",

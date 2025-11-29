@@ -706,3 +706,123 @@ LOW_PICK_SCORE_FLOOR: Final[float] = 5.0
 
 # 智能推送开关
 ENABLE_SMART_PUSH_STRATEGY: Final[bool] = True
+
+# ============================================================
+# Phase 10: 推送质量优化常量
+# ============================================================
+
+# 技术报告/方法论论文检测模式
+TECHNICAL_REPORT_PATTERNS: Final[list[str]] = [
+    "technical report",
+    "progress report",
+    "status report",
+    "white paper",
+    "position paper",
+    "survey of",
+    "review of",
+    "overview of",
+    "an introduction to",
+]
+
+# 应用领域关键词（非MGX相关）
+NON_MGX_APPLICATION_KEYWORDS: Final[list[str]] = [
+    "autonomous driving",
+    "self-driving",
+    "fake news",
+    "sarcasm detection",
+    "sentiment analysis",
+    "emotion recognition",
+    "medical imaging",
+    "drug discovery",
+    "climate prediction",
+    "financial forecasting",
+    "stock prediction",
+    "recommendation system",
+    "speech recognition",
+    "speaker identification",
+    "face recognition",
+    "object detection",
+    "image segmentation",
+    "video understanding",
+    "digital twin",
+    "iot network",
+    "smart city",
+    "smart home",
+]
+
+# 模型发布论文关键词（非Benchmark）
+MODEL_RELEASE_KEYWORDS: Final[list[str]] = [
+    "qwen",
+    "llama",
+    "gpt-",
+    "claude",
+    "gemini",
+    "palm",
+    "falcon",
+    "mistral",
+    "mixtral",
+    "phi-",
+    "deepseek",
+    "yi-",
+    "baichuan",
+    "chatglm",
+    "internlm",
+]
+
+# 扩展的算法方法短语
+ALGO_METHOD_PHRASES_EXTENDED: Final[list[str]] = [
+    # 现有短语保留
+    "we propose a",
+    "we propose an",
+    "we introduce a",
+    "we present a",
+    "we design a",
+    "a novel approach",
+    "a new approach",
+    "a novel framework",
+    "a new framework",
+    "a novel method",
+    "a new method",
+    "our method",
+    "our framework",
+    "our approach",
+    # 新增短语
+    "a new model",
+    "a novel model",
+    "our model",
+    "a new architecture",
+    "a novel architecture",
+    "a new technique",
+    "a novel technique",
+    "a new algorithm",
+    "a novel algorithm",
+    "we developed",
+    "we built",
+    "we trained",
+    "we fine-tuned",
+    "we adapted",
+    "we extended",
+    "a new strategy",
+    "a novel strategy",
+    "our strategy",
+]
+
+# Benchmark标题信号词（用于区分Benchmark论文 vs 方法论论文）
+BENCHMARK_TITLE_SIGNALS: Final[list[str]] = [
+    "benchmark",
+    "benchmarking",
+    "dataset",
+    "leaderboard",
+    "evaluation suite",
+    "test set",
+    "testset",
+    "challenge",
+    "competition",
+    "evaluation framework",
+    "assessment",
+]
+
+# Other领域推送限制
+OTHER_DOMAIN_RELEVANCE_FLOOR: Final[float] = 7.0  # Other领域相关性门槛
+OTHER_DOMAIN_MAX_RATIO: Final[float] = 0.20  # Other领域最多占20%
+OTHER_DOMAIN_MAX_COUNT: Final[int] = 3  # Other领域最多3条

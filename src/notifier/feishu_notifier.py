@@ -275,12 +275,57 @@ class FeishuNotifier:
 
             filtered.append(cand)
 
+        # === Phase 10新增: Other领域特殊处理 ===
+        other_candidates = [
+            c for c in filtered if (c.task_domain or constants.DEFAULT_TASK_DOMAIN) == "Other"
+        ]
+        non_other_candidates = [
+            c for c in filtered if (c.task_domain or constants.DEFAULT_TASK_DOMAIN) != "Other"
+        ]
+
+        # Other领域相关性门槛提高
+        other_qualified = [
+            c
+            for c in other_candidates
+            if c.relevance_score >= constants.OTHER_DOMAIN_RELEVANCE_FLOOR
+        ]
+
+        # 按相关性排序后限量
+        other_qualified = sorted(
+            other_qualified, key=lambda c: -c.relevance_score
+        )[: constants.OTHER_DOMAIN_MAX_COUNT]
+
+        filtered = non_other_candidates + other_qualified
+
+        logger.info(
+            "Other领域过滤: 原%d条 → 保留%d条 (门槛%.1f, 上限%d)",
+            len(other_candidates),
+            len(other_qualified),
+            constants.OTHER_DOMAIN_RELEVANCE_FLOOR,
+            constants.OTHER_DOMAIN_MAX_COUNT,
+        )
+        # === Phase 10新增结束 ===
+
         # 按新鲜度优先，其次分数
         def sort_key(c: ScoredCandidate) -> tuple[int, float]:
             age = self._age_days(c)
             return (age, -c.total_score)
 
         filtered = sorted(filtered, key=sort_key)
+
+        # Other领域占比限制（二次检查）
+        total_count = len(filtered)
+        if total_count > 0:
+            max_other = int(total_count * constants.OTHER_DOMAIN_MAX_RATIO)
+            other_in_filtered = [
+                c for c in filtered if (c.task_domain or constants.DEFAULT_TASK_DOMAIN) == "Other"
+            ]
+            if len(other_in_filtered) > max_other:
+                other_sorted = sorted(other_in_filtered, key=lambda c: c.relevance_score)
+                remove_count = len(other_in_filtered) - max_other
+                remove_set = {id(c) for c in other_sorted[:remove_count]}
+                filtered = [c for c in filtered if id(c) not in remove_set]
+                logger.info("Other领域占比限制: 移除%d条低相关性Other候选", remove_count)
 
         # 总量上限
         if len(filtered) > constants.PUSH_TOTAL_CAP:
