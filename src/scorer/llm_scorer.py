@@ -254,7 +254,7 @@ MGX是一个AI原生的多智能体协作框架（Vibe Coding），专注以下�
 
 **验证规则**：
 - 如果task_domain=Other但relevance_score>4，这是错误的，请修正
-- 如果task_domain∈{Coding,Backend,WebDev,GUI}但relevance_score<6，请检查分类是否正确
+- 如果task_domain∈{{Coding,Backend,WebDev,GUI}}但relevance_score<6，请检查分类是否正确
 
 【metrics】评估指标（数组，最多{max_metrics}个）
 - 用标准缩写或大写表示，例如：["Pass@1", "BLEU-4", "Accuracy", "F1-Score"]
