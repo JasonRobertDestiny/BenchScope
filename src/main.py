@@ -144,7 +144,7 @@ async def main() -> None:
         logger.info("GROBID服务就绪，PDF增强功能已启用")
 
     # Step 1: 数据采集
-    logger.info("[1/7] 数据采集...")
+    logger.info("[1/8] 数据采集...")
     collectors = [
         ArxivCollector(settings=settings),
         # SemanticScholarCollector(),  # 暂时禁用：无API密钥
@@ -171,7 +171,7 @@ async def main() -> None:
         return
 
     # Step 1.5: 去重（本次采集内部去重 + 过滤已推送的URL）
-    logger.info("[1.5/7] URL去重...")
+    logger.info("[1.5/8] URL去重...")
 
     # 1. 本次采集内部去重（保留第一次出现）
     seen_urls_this_batch: set[str] = set()
@@ -249,7 +249,7 @@ async def main() -> None:
         return
 
     # Step 2: 规则预筛选
-    logger.info("[2/7] 规则预筛选...")
+    logger.info("[2/8] 规则预筛选...")
     filtered = prefilter_batch(deduplicated)
     filter_rate = 100 * (1 - len(filtered) / len(deduplicated)) if deduplicated else 0
     logger.info("预筛选完成: 保留%d条 (过滤率%.1f%%)\n", len(filtered), filter_rate)
@@ -258,7 +258,7 @@ async def main() -> None:
         return
 
     # Step 3: PDF 内容增强（仅对通过预筛选的候选进行深度解析）
-    logger.info("[3/7] PDF内容增强...")
+    logger.info("[3/8] PDF内容增强...")
     pdf_enhancer = PDFEnhancer()
     enhanced_candidates = await pdf_enhancer.enhance_batch(filtered)
     arxiv_count = sum(1 for c in filtered if c.source == "arxiv")
@@ -269,31 +269,36 @@ async def main() -> None:
     )
 
     # Step 4: LLM评分（使用增强后的候选）
-    logger.info("[4/7] LLM评分...")
+    logger.info("[4/8] LLM评分...")
     async with LLMScorer() as scorer:
         scored = await scorer.score_batch(enhanced_candidates)
     logger.info("评分完成: %d条\n", len(scored))
 
     # Step 4.5: 论文/权威源兜底打分（最新且相关不因无GitHub被重罚）
-    logger.info("[4.5/7] 权威源分数兜底...")
+    logger.info("[4.5/8] 权威源分数兜底...")
     scored = [_apply_recency_domain_floor(c) for c in scored]
 
     # Step 4.6: 时间新鲜度加权（最新优先，兼顾任务相关性）
-    logger.info("[4.6/7] 新鲜度加权...")
+    logger.info("[4.6/8] 新鲜度加权...")
     scored = [_apply_freshness_boost(c) for c in scored]
 
+    # Step 4.7: 相关性硬下限过滤（P10新增）
+    logger.info("[4.7/8] 相关性硬下限过滤...")
+    scored = _filter_by_relevance_floor(scored)
+    logger.info("相关性过滤后: %d条\n", len(scored))
+
     # Step 5: 图片上传已禁用以节省时间
-    logger.info("[5/7] 图片上传已跳过，减少耗时")
+    logger.info("[5/8] 图片上传已跳过，减少耗时")
 
     # Step 6: 存储入库
-    logger.info("[6/7] 存储入库...")
+    logger.info("[6/8] 存储入库...")
     actually_saved = await storage.save(scored)  # 获取实际写入的记录（去重后）
     await storage.sync_from_sqlite()
     await storage.cleanup()
     logger.info("存储完成: 新增%d条\n", len(actually_saved))
 
     # Step 7: 飞书通知（仅通知新增记录，避免重复推送）
-    logger.info("[7/7] 飞书通知...")
+    logger.info("[7/8] 飞书通知...")
     notifier = FeishuNotifier(settings=settings)
     if actually_saved:
         await notifier.notify(actually_saved)  # 只通知新增的记录
@@ -375,6 +380,35 @@ def _apply_freshness_boost(candidate: ScoredCandidate) -> ScoredCandidate:
         boosted_total,
     )
     return candidate
+
+
+def _filter_by_relevance_floor(
+    candidates: List[ScoredCandidate],
+) -> List[ScoredCandidate]:
+    """过滤相关性低于硬下限的候选，避免低相关噪声入库。"""
+
+    filtered: List[ScoredCandidate] = []
+    dropped = 0
+    for candidate in candidates:
+        if candidate.relevance_score >= constants.RELEVANCE_HARD_FLOOR:
+            filtered.append(candidate)
+        else:
+            dropped += 1
+            logger.debug(
+                "相关性硬下限过滤: %s (relevance=%.1f < %.1f)",
+                candidate.title[: constants.TITLE_TRUNCATE_SHORT],
+                candidate.relevance_score,
+                constants.RELEVANCE_HARD_FLOOR,
+            )
+
+    if dropped > 0:
+        logger.info(
+            "相关性硬下限过滤: 移除%d条 (relevance < %.1f)",
+            dropped,
+            constants.RELEVANCE_HARD_FLOOR,
+        )
+
+    return filtered
 
 
 def _apply_recency_domain_floor(candidate: ScoredCandidate) -> ScoredCandidate:

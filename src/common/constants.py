@@ -302,7 +302,7 @@ DBENGINES_MAX_RESULTS: Final[int] = 50
 
 # ---- Prefilter 配置 ----
 PREFILTER_SIMILARITY_THRESHOLD: Final[float] = 0.9
-PREFILTER_MIN_GITHUB_STARS: Final[int] = 10
+PREFILTER_MIN_GITHUB_STARS: Final[int] = 30  # 从10提高到30，过滤低质量仓库
 PREFILTER_MIN_README_LENGTH: Final[int] = 500
 PREFILTER_RECENT_DAYS: Final[int] = 90
 PREFILTER_REQUIRED_KEYWORDS: Final[list[str]] = [
@@ -517,12 +517,34 @@ PRIORITY_MEDIUM_THRESHOLD: Final[int] = 30
 # 评分阈值
 MIN_TOTAL_SCORE: Final[float] = 6.0  # 低于6分不入库
 SCORE_WEIGHTS: Final[dict[str, float]] = {
-    "activity": 0.15,  # 降低：GitHub stars容易虚高
-    "reproducibility": 0.30,  # 保持：可复现性是核心
-    "license": 0.15,  # 降低：不是核心指标
-    "novelty": 0.15,  # 提高：Benchmark需要创新
-    "relevance": 0.25,  # 提高：MGX适配度是关键
+    "activity": 0.10,  # 降低：GitHub stars容易虚高
+    "reproducibility": 0.25,  # 降低：可复现性仍重要
+    "license": 0.10,  # 降低：不是核心指标
+    "novelty": 0.15,  # 保持：Benchmark需要创新
+    "relevance": 0.40,  # 提高：MGX适配度是关键
 }
+
+# Benchmark正向信号词（权威来源检测用）
+BENCHMARK_POSITIVE_SIGNALS: Final[list[str]] = [
+    "benchmark",
+    "benchmarking",
+    "evaluation benchmark",
+    "test set",
+    "testset",
+    "dataset",
+    "leaderboard",
+    "evaluation suite",
+    "corpus",
+    "test data",
+    "evaluation data",
+    "ground truth",
+    "challenge",
+    "competition",
+    "shared task",
+]
+
+# 相关性硬下限（低于此分数不入库）
+RELEVANCE_HARD_FLOOR: Final[float] = 6.0
 
 # ---- 存储与通知 ----
 FEISHU_BATCH_SIZE: Final[int] = 20
@@ -640,7 +662,7 @@ FEISHU_LOW_PICK_PER_SOURCE: Final[dict[str, int]] = {
 }
 # 推送过滤与质量控制
 PUSH_MAX_AGE_DAYS: Final[int] = 30  # 超过30天仅保留高分(>=8)的历史优质项
-PUSH_RELEVANCE_FLOOR: Final[float] = 5.5  # 任务相关性下限，低于则不推
+PUSH_RELEVANCE_FLOOR: Final[float] = 6.5  # 任务相关性下限，从5.5提高到6.5
 PUSH_TOTAL_CAP: Final[int] = 15  # 单次推送总条数上限
 
 # 推送卡片UX（方案B：两分区）

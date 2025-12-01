@@ -23,6 +23,65 @@ def _contains_any(text: str, keywords: list[str]) -> bool:
     return any(kw in lowered for kw in keywords)
 
 
+def _has_benchmark_positive_signal(candidate: RawCandidate) -> bool:
+    """检查是否包含Benchmark正向信号词"""
+
+    text = f"{candidate.title} {(candidate.abstract or '')}".lower()
+    return _contains_any(text, constants.BENCHMARK_POSITIVE_SIGNALS)
+
+
+def _has_benchmark_characteristics(candidate: RawCandidate) -> bool:
+    """检测是否具备真实Benchmark特征（适用于所有来源）
+
+    排除规则：
+    - 框架/系统描述 + 无强Benchmark信号 → 过滤
+    - 资源列表/教程/课程 + 无强Benchmark信号 → 过滤
+    """
+
+    text = f"{candidate.title} {(candidate.abstract or '')}".lower()
+
+    # 排除模式（非Benchmark特征）
+    exclude_patterns = [
+        # 框架/系统描述
+        "framework for",
+        "we propose a",
+        "we implement",
+        "we develop",
+        "a novel system",
+        "agent framework",
+        "gui agent",
+        # 资源列表
+        "awesome",
+        "curated list",
+        "collection of",
+        "list of tools",
+        "list of resources",
+        # 教程/课程
+        "tutorial",
+        "course",
+        "learning path",
+        "how to",
+        # 无关领域
+        "robot",
+        "robotics",
+        "autonomous vehicle",
+        "medical",
+        "healthcare",
+    ]
+
+    has_exclude_pattern = any(p in text for p in exclude_patterns)
+
+    if has_exclude_pattern:
+        # 有排除模式时，必须有强Benchmark信号才通过
+        strong_signals = ["benchmark", "evaluation", "leaderboard", "test set", "dataset"]
+        if not any(s in text for s in strong_signals):
+            logger.debug("排除: 有排除模式但无强Benchmark信号 - %s", candidate.title[:50])
+            return False
+
+    # 正向特征检查
+    return _has_benchmark_positive_signal(candidate)
+
+
 def _looks_like_tool_repo(candidate: RawCandidate) -> bool:
     """基于标题与摘要快速判断是否是工具/框架/协议而非Benchmark。
 
@@ -211,6 +270,11 @@ def _prefilter_with_reason(candidate: RawCandidate) -> tuple[bool, str]:
     if not _passes_keyword_rules(candidate):
         return False, "keyword_rule"
 
+    # P10新增: 所有来源统一执行Benchmark特征检测（GitHub除外，已有更严格检测）
+    if candidate.source != "github" and not _has_benchmark_characteristics(candidate):
+        logger.debug("过滤: 缺少Benchmark特征 - %s (%s)", candidate.title, candidate.source)
+        return False, "no_benchmark_feature"
+
     if candidate.source == "github" and not _is_quality_github_repo(candidate):
         return False, "github_quality"
 
@@ -318,15 +382,26 @@ def _is_quality_github_repo(candidate: RawCandidate) -> bool:
 
 
 def _passes_keyword_rules(candidate: RawCandidate) -> bool:
-    """基于Phase7白/黑名单的关键词过滤（权威来源豁免）"""
+    """基于Phase7白/黑名单的关键词过滤
+
+    P10优化: 权威来源不再完全豁免，仍需通过Benchmark正向特征检查
+    """
 
     if candidate.source in TRUSTED_SOURCES:
+        # 权威来源仅豁免排除词检查，仍需具备正向特征
+        if _has_benchmark_positive_signal(candidate):
+            logger.debug(
+                "权威来源通过正向特征检查: %s (%s)",
+                candidate.title[: constants.TITLE_TRUNCATE_SHORT],
+                candidate.source,
+            )
+            return True
         logger.debug(
-            "权威来源豁免关键词检查: %s (%s)",
+            "权威来源未通过正向特征检查: %s (%s)",
             candidate.title[: constants.TITLE_TRUNCATE_SHORT],
             candidate.source,
         )
-        return True
+        return False
 
     text = f"{candidate.title} {(candidate.abstract or '')}".lower()
 
