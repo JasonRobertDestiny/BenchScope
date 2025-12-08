@@ -150,7 +150,7 @@ class FeishuStorage:
             candidates: 待写入的候选列表
 
         Returns:
-            实际写入的候选列表（去重后），用于后续通知
+            实际成功写入的候选列表（用于后续通知）
         """
 
         if not candidates:
@@ -176,34 +176,64 @@ class FeishuStorage:
             logger.info("飞书去重后无新增记录，跳过写入")
             return []
 
+        actually_saved: list[ScoredCandidate] = []
+
         async with httpx.AsyncClient(timeout=10) as client:
             for start in range(0, len(deduped_candidates), self.batch_size):
                 chunk = deduped_candidates[start : start + self.batch_size]
                 records = [self._to_feishu_record(c) for c in chunk]
                 try:
-                    await self._batch_create_records(client, records)
+                    created_count, expected_count = await self._batch_create_records_with_count(
+                        client, records
+                    )
                 except FeishuAPIError as exc:
                     if "access_token不存在" in str(exc):
                         logger.warning("飞书写入token失效，自动刷新后重试当前批次")
                         await self._ensure_access_token()
-                        await self._batch_create_records(client, records)
+                        created_count, expected_count = (
+                            await self._batch_create_records_with_count(
+                                client, records
+                            )
+                        )
                     else:
                         raise
+                except Exception:
+                    # 未知异常直接跳过当前批次，避免影响后续流程
+                    logger.exception("飞书批次写入出现异常，已跳过当前批次")
+                    created_count = -1
+                    expected_count = len(chunk)
 
-                # 将当前批次加入缓存，避免同一次运行内的重复
-                for cand in chunk:
-                    url_key = canonicalize_url(cand.url)
-                    if url_key:
-                        existing_urls.add(url_key)
+                # 仅在完全成功时返回并更新缓存；部分成功不纳入通知列表
+                if created_count == expected_count == len(chunk):
+                    actually_saved.extend(chunk)
+                    for cand in chunk:
+                        url_key = canonicalize_url(cand.url)
+                        if url_key:
+                            existing_urls.add(url_key)
+                else:
+                    logger.warning(
+                        "飞书批次写入未完全成功: 预期%d条, 成功%d条",
+                        len(chunk),
+                        created_count,
+                    )
 
                 if start + self.batch_size < len(deduped_candidates):
                     await asyncio.sleep(self.rate_interval)
 
-        return deduped_candidates
+        logger.info(
+            "飞书写入完成: 去重后待写入%d条, 实际成功%d条",
+            len(deduped_candidates),
+            len(actually_saved),
+        )
+        return actually_saved
 
-    async def _batch_create_records(
+    async def _batch_create_records_with_count(
         self, client: httpx.AsyncClient, records: List[dict]
-    ) -> None:
+    ) -> tuple[int, int]:
+        """批量创建记录并返回(实际创建数, 预期创建数)
+
+        P14: 返回实际成功数量，便于调用方与通知保持一致
+        """
         url = (
             f"{self.base_url}/bitable/v1/apps/{self.settings.feishu.bitable_app_token}/"
             f"tables/{self.settings.feishu.bitable_table_id}/records/batch_create"
@@ -255,10 +285,11 @@ class FeishuStorage:
                 )
 
             logger.info(
-                "飞书批次写入成功: %s条 (实际创建%s条)",
+                "飞书批次写入完成: %s条 (实际创建%s条)",
                 len(filtered_records),
                 actual_count,
             )
+            return actual_count, expected_count
 
         except httpx.HTTPStatusError as exc:
             logger.error(
@@ -508,31 +539,38 @@ class FeishuStorage:
         return {"fields": fields}
 
     async def get_existing_urls(self) -> set[str]:
-        """查询飞书Bitable已存在的所有URL（用于去重）"""
+        """查询飞书Bitable已存在的所有URL（用于去重）
+
+        P13修复: 改用GET records接口，规避search接口分页token重复导致漏数
+        """
         await self._ensure_access_token()
 
         existing_urls: set[str] = set()
-        page_token = None
+        page_token: Optional[str] = None
         max_pages = 20  # 避免异常has_more导致死循环
         page_count = 0
-        seen_tokens: set[str] = set()
+        page_size = 500  # GET接口推荐500，token稳定
 
         async with httpx.AsyncClient(timeout=10) as client:
             await self._ensure_field_cache(client)
             while True:
-                url = f"{self.base_url}/bitable/v1/apps/{self.settings.feishu.bitable_app_token}/tables/{self.settings.feishu.bitable_table_id}/records/search"
+                url = (
+                    f"{self.base_url}/bitable/v1/apps/"
+                    f"{self.settings.feishu.bitable_app_token}/tables/"
+                    f"{self.settings.feishu.bitable_table_id}/records"
+                )
 
-                # 分页查询所有记录
-                payload = {"page_size": 1000}
+                # 分页查询所有记录（GET接口无重复token问题）
+                params: Dict[str, Any] = {"page_size": page_size}
                 if page_token:
-                    payload["page_token"] = page_token
+                    params["page_token"] = page_token
 
                 resp = await self._request_with_retry(
                     client,
-                    "POST",
+                    "GET",
                     url,
                     headers=self._auth_header(),
-                    json=payload,
+                    params=params,
                 )
                 resp.raise_for_status()
                 data = resp.json()
@@ -569,12 +607,6 @@ class FeishuStorage:
                 if not page_token:
                     break
 
-                # 防御：重复token或超页直接退出，避免刷屏阻塞
-                if page_token in seen_tokens:
-                    logger.warning("飞书去重分页检测到重复page_token，提前终止以防死循环")
-                    break
-                seen_tokens.add(page_token)
-
                 page_count += 1
                 if page_count >= max_pages:
                     logger.warning(
@@ -588,32 +620,41 @@ class FeishuStorage:
         return existing_urls
 
     async def read_existing_records(self) -> List[dict[str, Any]]:
-        """查询飞书已存在的记录，含URL/发布时间/来源，用于时间窗去重"""
+        """查询飞书已存在的记录，含URL/发布时间/创建时间/来源，用于时间窗去重
+
+        P12修复: 读取飞书系统字段创建时间，基于入库时间完成去重
+        P13修复: 改用GET records接口，避免search分页token重复导致漏数
+        """
 
         await self._ensure_access_token()
 
-        records: List[dict[str, Optional[datetime]]] = []
+        records: List[dict[str, Any]] = []
         page_token: Optional[str] = None
         url_field = self.FIELD_MAPPING["url"]
         publish_field = self.FIELD_MAPPING["publish_date"]
         max_pages = 20  # 防止无限分页刷请求
         page_count = 0
+        page_size = 500
 
         async with httpx.AsyncClient(timeout=10) as client:
             await self._ensure_field_cache(client)
             while True:
-                url = f"{self.base_url}/bitable/v1/apps/{self.settings.feishu.bitable_app_token}/tables/{self.settings.feishu.bitable_table_id}/records/search"
+                url = (
+                    f"{self.base_url}/bitable/v1/apps/"
+                    f"{self.settings.feishu.bitable_app_token}/tables/"
+                    f"{self.settings.feishu.bitable_table_id}/records"
+                )
 
-                payload: Dict[str, Any] = {"page_size": 1000}
+                params: Dict[str, Any] = {"page_size": page_size}
                 if page_token:
-                    payload["page_token"] = page_token
+                    params["page_token"] = page_token
 
                 resp = await self._request_with_retry(
                     client,
-                    "POST",
+                    "GET",
                     url,
                     headers=self._auth_header(),
-                    json=payload,
+                    params=params,
                 )
                 resp.raise_for_status()
                 data = resp.json()
@@ -627,6 +668,7 @@ class FeishuStorage:
                     fields = item.get("fields", {})
                     url_obj = fields.get(url_field)
                     publish_raw = fields.get(publish_field)
+                    created_raw = fields.get("创建时间")
 
                     # URL字段兼容两种格式
                     if isinstance(url_obj, dict):
@@ -652,6 +694,21 @@ class FeishuStorage:
                     if publish_date:
                         publish_date = publish_date.replace(tzinfo=None)
 
+                    # P12: 解析记录创建时间，优先用于去重
+                    created_at: Optional[datetime] = None
+                    if isinstance(created_raw, (int, float)):
+                        created_at = datetime.fromtimestamp(created_raw / 1000)
+                    elif isinstance(created_raw, str) and created_raw:
+                        try:
+                            created_at = datetime.fromisoformat(
+                                created_raw.replace("Z", "+00:00")
+                            )
+                        except ValueError:
+                            logger.debug("无法解析创建时间: %s", created_raw)
+
+                    if created_at:
+                        created_at = created_at.replace(tzinfo=None)
+
                     if url_key:
                         source_field = self.FIELD_MAPPING.get("source", "来源")
                         source_value = fields.get(source_field, "default")
@@ -659,6 +716,7 @@ class FeishuStorage:
                             "url": str(url_value),
                             "url_key": url_key,
                             "publish_date": publish_date,
+                            "created_at": created_at,
                             "source": str(source_value),
                         }
                         records.append(record_item)
@@ -699,25 +757,29 @@ class FeishuStorage:
         page_token: Optional[str] = None
         max_pages = 20
         page_count = 0
-        seen_tokens: set[str] = set()
+        page_size = 500
 
         records: List[dict[str, Any]] = []
 
         async with httpx.AsyncClient(timeout=10) as client:
             await self._ensure_field_cache(client)
             while True:
-                url = f"{self.base_url}/bitable/v1/apps/{self.settings.feishu.bitable_app_token}/tables/{self.settings.feishu.bitable_table_id}/records/search"
+                url = (
+                    f"{self.base_url}/bitable/v1/apps/"
+                    f"{self.settings.feishu.bitable_app_token}/tables/"
+                    f"{self.settings.feishu.bitable_table_id}/records"
+                )
 
-                payload: Dict[str, Any] = {"page_size": 1000}
+                params: Dict[str, Any] = {"page_size": page_size}
                 if page_token:
-                    payload["page_token"] = page_token
+                    params["page_token"] = page_token
 
                 resp = await self._request_with_retry(
                     client,
-                    "POST",
+                    "GET",
                     url,
                     headers=self._auth_header(),
-                    json=payload,
+                    params=params,
                 )
                 resp.raise_for_status()
                 data = resp.json()
@@ -747,9 +809,8 @@ class FeishuStorage:
                     break
 
                 page_token = data.get("data", {}).get("page_token")
-                if not page_token or page_token in seen_tokens:
+                if not page_token:
                     break
-                seen_tokens.add(page_token)
 
                 page_count += 1
                 if page_count >= max_pages:
