@@ -698,10 +698,11 @@ DATASET_SIZE_MULTIPLIERS: Final[dict[str, int]] = {
 # 去重配置
 # ============================================================
 # 去重时仅对比最近N天内的已入库记录，降低新数据被老记录覆盖的概率
-DEDUP_LOOKBACK_DAYS: Final[int] = 14
+DEDUP_LOOKBACK_DAYS: Final[int] = 30  # P12: 默认窗口扩大至30天
 # 按来源定制去重窗口，未命中则使用default
 DEDUP_LOOKBACK_DAYS_BY_SOURCE: Final[dict[str, int]] = {
-    "arxiv": 3,  # arXiv仅对比近3天，避免与7天采集窗口完全重叠
+    "arxiv": 7,  # P12: arXiv窗口放宽，与采集窗口一致
+    "github": 30,  # P12: GitHub明确使用30天窗口
     "default": DEDUP_LOOKBACK_DAYS,
 }
 
@@ -717,7 +718,7 @@ FEISHU_LOW_PICK_PER_SOURCE: Final[dict[str, int]] = {
 }
 # 推送过滤与质量控制
 PUSH_MAX_AGE_DAYS: Final[int] = 30  # 超过30天仅保留高分(>=8)的历史优质项
-PUSH_RELEVANCE_FLOOR: Final[float] = 6.5  # 任务相关性下限，从5.5提高到6.5
+PUSH_RELEVANCE_FLOOR: Final[float] = 6.0  # P14: 与入库阈值RELEVANCE_HARD_FLOOR统一，避免入库后被推送过滤
 PUSH_TOTAL_CAP: Final[int] = 15  # 单次推送总条数上限
 
 # 推送卡片UX（方案B：两分区）
