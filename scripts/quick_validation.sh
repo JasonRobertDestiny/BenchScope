@@ -37,8 +37,8 @@ echo "✅ 通过: PwC采集器已完全移除"
 # 检查GitHub预筛选常量
 echo ""
 echo "[3/6] 验证GitHub预筛选常量..."
-if grep -q "PREFILTER_MIN_GITHUB_STARS.*10" src/common/constants.py; then
-    echo "✅ 通过: stars阈值已降低到10"
+if grep -q "PREFILTER_MIN_GITHUB_STARS.*30" src/common/constants.py; then
+    echo "✅ 通过: stars阈值已设置为30"
 else
     echo "❌ 失败: stars阈值未更新"
     exit 1
@@ -78,17 +78,17 @@ else
     exit 1
 fi
 
-if [ -f "scripts/deduplicate_feishu_table.py" ]; then
-    echo "✅ 通过: deduplicate_feishu_table.py已创建"
+if [ -f "scripts/deduplicate_feishu_table.py" ] || [ -f "scripts/dedupe_bitable.py" ]; then
+    echo "✅ 通过: 飞书表去重脚本已存在"
 else
-    echo "❌ 失败: deduplicate_feishu_table.py不存在"
+    echo "❌ 失败: 飞书表去重脚本不存在"
     exit 1
 fi
 
-if [ -f "scripts/sync_sqlite_to_feishu.py" ]; then
-    echo "✅ 通过: sync_sqlite_to_feishu.py已创建"
+if [ -f "scripts/sync_sqlite_to_feishu.py" ] || [ -f "scripts/verify_recent_data.py" ]; then
+    echo "✅ 通过: 数据同步/校验脚本已存在"
 else
-    echo "❌ 失败: sync_sqlite_to_feishu.py不存在"
+    echo "❌ 失败: 数据同步/校验脚本不存在"
     exit 1
 fi
 

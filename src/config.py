@@ -96,6 +96,8 @@ class GitHubSourceSettings:
 @dataclass(slots=True)
 class HuggingFaceSourceSettings:
     enabled: bool = True
+    api_url: str = constants.HUGGINGFACE_DATASETS_API_URL
+    timeout_seconds: int = constants.HUGGINGFACE_TIMEOUT_SECONDS
     keywords: list[str] = field(
         default_factory=lambda: constants.HUGGINGFACE_KEYWORDS.copy()
     )
@@ -155,12 +157,8 @@ class SourcesSettings:
     techempower: TechEmpowerSourceSettings = field(
         default_factory=TechEmpowerSourceSettings
     )
-    dbengines: DBEnginesSourceSettings = field(
-        default_factory=DBEnginesSourceSettings
-    )
-    twitter: TwitterSourceSettings = field(
-        default_factory=TwitterSourceSettings
-    )
+    dbengines: DBEnginesSourceSettings = field(default_factory=DBEnginesSourceSettings)
+    twitter: TwitterSourceSettings = field(default_factory=TwitterSourceSettings)
 
 
 @dataclass(slots=True)
@@ -300,6 +298,14 @@ def _load_sources_settings(path: Path) -> SourcesSettings:
         ),
         huggingface=HuggingFaceSourceSettings(
             enabled=bool(huggingface_cfg.get("enabled", True)),
+            api_url=huggingface_cfg.get(
+                "api_url", constants.HUGGINGFACE_DATASETS_API_URL
+            ),
+            timeout_seconds=int(
+                huggingface_cfg.get(
+                    "timeout_seconds", constants.HUGGINGFACE_TIMEOUT_SECONDS
+                )
+            ),
             keywords=huggingface_cfg.get("keywords")
             or constants.HUGGINGFACE_KEYWORDS.copy(),
             task_categories=huggingface_cfg.get("task_categories")
@@ -324,9 +330,7 @@ def _load_sources_settings(path: Path) -> SourcesSettings:
         ),
         techempower=TechEmpowerSourceSettings(
             enabled=bool(techempower_cfg.get("enabled", True)),
-            base_url=techempower_cfg.get(
-                "base_url", constants.TECHEMPOWER_BASE_URL
-            ),
+            base_url=techempower_cfg.get("base_url", constants.TECHEMPOWER_BASE_URL),
             timeout_seconds=int(
                 techempower_cfg.get(
                     "timeout_seconds", constants.TECHEMPOWER_TIMEOUT_SECONDS
@@ -341,9 +345,7 @@ def _load_sources_settings(path: Path) -> SourcesSettings:
         ),
         dbengines=DBEnginesSourceSettings(
             enabled=bool(dbengines_cfg.get("enabled", True)),
-            base_url=dbengines_cfg.get(
-                "base_url", constants.DBENGINES_BASE_URL
-            ),
+            base_url=dbengines_cfg.get("base_url", constants.DBENGINES_BASE_URL),
             timeout_seconds=int(
                 dbengines_cfg.get(
                     "timeout_seconds", constants.DBENGINES_TIMEOUT_SECONDS
@@ -356,9 +358,7 @@ def _load_sources_settings(path: Path) -> SourcesSettings:
         twitter=TwitterSourceSettings(
             enabled=bool(twitter_cfg.get("enabled", False)),
             lookback_days=int(
-                twitter_cfg.get(
-                    "lookback_days", constants.TWITTER_LOOKBACK_DAYS
-                )
+                twitter_cfg.get("lookback_days", constants.TWITTER_LOOKBACK_DAYS)
             ),
             max_results_per_query=int(
                 twitter_cfg.get(
@@ -380,14 +380,10 @@ def _load_sources_settings(path: Path) -> SourcesSettings:
             ),
             must_have_url=bool(twitter_filters.get("must_have_url", True)),
             language=str(
-                twitter_filters.get(
-                    "language", constants.TWITTER_DEFAULT_LANGUAGE
-                )
+                twitter_filters.get("language", constants.TWITTER_DEFAULT_LANGUAGE)
             ),
             rate_limit_delay=float(
-                twitter_cfg.get(
-                    "rate_limit_delay", constants.TWITTER_RATE_LIMIT_DELAY
-                )
+                twitter_cfg.get("rate_limit_delay", constants.TWITTER_RATE_LIMIT_DELAY)
             ),
         ),
     )

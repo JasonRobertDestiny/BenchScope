@@ -193,16 +193,17 @@ async def main() -> None:
     # 按来源应用不同的去重窗口
     recent_urls_by_source: dict[str, set[str]] = {}
     for record in existing_records:
-        publish_date = record.get("publish_date")
+        # P12: 优先使用记录创建时间，兼容旧数据退回到发布时间
+        dedup_time = record.get("created_at") or record.get("publish_date")
         url_value = record.get("url")
         source_value = record.get("source", "default")
         url_key = canonicalize_url(url_value)
-        if not isinstance(publish_date, datetime) or not url_key:
+        if not isinstance(dedup_time, datetime) or not url_key:
             continue
         window_days = constants.DEDUP_LOOKBACK_DAYS_BY_SOURCE.get(
             source_value, constants.DEDUP_LOOKBACK_DAYS_BY_SOURCE["default"]
         )
-        if publish_date >= now - timedelta(days=window_days):
+        if dedup_time >= now - timedelta(days=window_days):
             recent_urls_by_source.setdefault(source_value, set()).add(url_key)
 
     deduplicated: List[RawCandidate] = []

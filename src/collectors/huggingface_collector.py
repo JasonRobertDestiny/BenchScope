@@ -4,17 +4,25 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import os
 from datetime import datetime, timedelta, timezone
 from typing import Any, List, Optional
 
-from huggingface_hub import HfApi
+import httpx
 
 from src.common import constants
 from src.config import Settings, get_settings
 from src.models import RawCandidate
 
 logger = logging.getLogger(__name__)
+
+HF_DATASETS_EXPAND_FIELDS: tuple[str, ...] = (
+    # P15: 显式请求必要字段，避免API默认字段不足导致过滤全为空
+    "downloads",
+    "tags",
+    "lastModified",
+    "cardData",
+    "description",
+)
 
 
 class HuggingFaceCollector:
@@ -23,20 +31,69 @@ class HuggingFaceCollector:
     def __init__(self, settings: Optional[Settings] = None) -> None:
         self.settings = settings or get_settings()
         self.cfg = self.settings.sources.huggingface
-        self.api = HfApi(token=os.getenv("HUGGINGFACE_TOKEN"))
+        self.api_url = self.cfg.api_url or constants.HUGGINGFACE_DATASETS_API_URL
+        # P15: 添加httpx client超时配置（避免默认超时过短导致频繁失败）
+        self.http_client = httpx.AsyncClient(
+            timeout=httpx.Timeout(self.cfg.timeout_seconds),
+            headers=self._build_headers(),
+            follow_redirects=True,
+        )
+
+    def _build_headers(self) -> dict[str, str]:
+        headers = {"Accept": "application/json"}
+        if self.cfg.token:
+            headers["Authorization"] = f"Bearer {self.cfg.token}"
+        return headers
+
+    async def aclose(self) -> None:
+        """确保HTTP client正确关闭（P15: 避免连接泄露）"""
+
+        if not self.http_client.is_closed:
+            await self.http_client.aclose()
+
+    async def __aenter__(self) -> "HuggingFaceCollector":
+        return self
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb) -> None:
+        await self.aclose()
 
     async def collect(self) -> List[RawCandidate]:
         """采集符合下载量与关键词要求的数据集"""
 
         if not self.cfg.enabled:
             logger.info("HuggingFace采集器已禁用,直接返回空列表")
+            await self.aclose()
             return []
 
         try:
             datasets = await self._fetch_datasets()
-        except Exception as exc:  # noqa: BLE001
-            logger.error("HuggingFace采集失败: %s", exc)
+            candidates = self._build_candidates(datasets)
+            logger.info("HuggingFace采集完成,候选数%s", len(candidates))
+            return candidates
+        except httpx.TimeoutException as exc:
+            # P15: 超时异常单独处理，提供更详细的日志
+            logger.error(
+                "HuggingFace采集超时: %s, 超时配置=%s秒",
+                exc,
+                self.cfg.timeout_seconds,
+            )
             return []
+        except httpx.NetworkError as exc:
+            # P15: 网络错误单独处理
+            logger.error(
+                "HuggingFace网络错误: %s, 请检查网络连接或HuggingFace服务状态, 超时配置=%s秒",
+                exc,
+                self.cfg.timeout_seconds,
+            )
+            return []
+        except Exception as exc:  # noqa: BLE001
+            logger.error("HuggingFace采集失败: %s", exc, exc_info=True)
+            return []
+        finally:
+            await self.aclose()
+
+    def _build_candidates(self, datasets: List[dict[str, Any]]) -> List[RawCandidate]:
+        """将原始数据集列表转换为候选项列表"""
 
         candidates: List[RawCandidate] = []
         for dataset in datasets:
@@ -46,48 +103,74 @@ class HuggingFaceCollector:
             if not self._is_benchmark_dataset(payload):
                 continue
 
-            dataset_id = payload.get("id") or payload.get("_id")
             candidate = self._to_candidate(payload)
-            if candidate:
-                # 图片功能已移除
-                candidate.hero_image_url = None
-                candidates.append(candidate)
-
-        logger.info("HuggingFace采集完成,候选数%s", len(candidates))
+            if not candidate:
+                continue
+            # 图片功能已移除
+            candidate.hero_image_url = None
+            candidates.append(candidate)
         return candidates
 
-    async def _fetch_datasets(self) -> List[Any]:
-        """在线程池执行同步API调用"""
+    async def _fetch_datasets(self) -> List[dict[str, Any]]:
+        """通过HuggingFace官方API搜索数据集并合并去重（P15: 增强网络稳定性）"""
 
-        return await asyncio.to_thread(self._list_datasets)
-
-    def _list_datasets(self) -> List[Any]:
-        """列出HuggingFace数据集
-
-        注意1: 不使用task_categories过滤
-        原因: HuggingFace API对多个task_categories使用AND逻辑,
-              导致过滤过严(需要同时属于所有类别)
-
-        注意2: HuggingFace API不支持OR操作符
-        策略: 轮询每个关键词并合并去重
-        """
-        all_datasets = []
-        seen_ids = set()
+        all_datasets: List[dict[str, Any]] = []
+        seen_ids: set[str] = set()
 
         for keyword in self.cfg.keywords:
-            datasets = self.api.list_datasets(
-                search=keyword,
-                sort="lastModified",
-                limit=self.cfg.limit,
-            )
-
+            keyword = str(keyword or "").strip()
+            if not keyword:
+                continue
+            datasets = await self._fetch_datasets_by_keyword(keyword)
             for ds in datasets:
-                ds_id = getattr(ds, "id", None) or getattr(ds, "_id", None)
+                ds_id = str(ds.get("id") or ds.get("_id") or "")
                 if ds_id and ds_id not in seen_ids:
                     seen_ids.add(ds_id)
                     all_datasets.append(ds)
 
         return all_datasets
+
+    async def _fetch_datasets_by_keyword(self, keyword: str) -> List[dict[str, Any]]:
+        """按关键词搜索数据集（P15: 含超时与重试）"""
+
+        params: dict[str, Any] = {
+            "search": keyword,
+            "sort": "lastModified",
+            "direction": -1,
+            "limit": self.cfg.limit,
+            "expand": list(HF_DATASETS_EXPAND_FIELDS),
+        }
+
+        resp = await self._get_with_retry(params=params)
+        payload = resp.json()
+        if not isinstance(payload, list):
+            return []
+        return [item for item in payload if isinstance(item, dict)]
+
+    async def _get_with_retry(self, params: dict[str, Any]) -> httpx.Response:
+        """带重试的GET请求（P15: 网络抖动/瞬断时提高成功率）"""
+
+        last_exc: Exception | None = None
+        for attempt in range(1, constants.HUGGINGFACE_HTTP_MAX_RETRIES + 1):
+            try:
+                resp = await self.http_client.get(self.api_url, params=params)
+                resp.raise_for_status()
+                return resp
+            except (httpx.TimeoutException, httpx.NetworkError) as exc:  # noqa: PERF203
+                last_exc = exc
+                if attempt >= constants.HUGGINGFACE_HTTP_MAX_RETRIES:
+                    raise
+                delay = constants.HUGGINGFACE_HTTP_RETRY_DELAY_SECONDS * attempt
+                logger.warning(
+                    "HuggingFace请求失败,准备重试(%s/%s), 等待%s秒, 错误: %r",
+                    attempt,
+                    constants.HUGGINGFACE_HTTP_MAX_RETRIES,
+                    delay,
+                    exc,
+                )
+                await asyncio.sleep(delay)
+
+        raise RuntimeError(f"HuggingFace请求失败: {last_exc!r}")
 
     def _normalize_dataset(self, dataset: Any) -> dict[str, Any]:
         """兼容 DatasetInfo/字典,统一输出字典"""

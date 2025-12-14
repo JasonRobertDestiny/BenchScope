@@ -8,7 +8,7 @@ on:
 jobs:
   collect:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
 
     services:
       redis:
@@ -34,14 +34,41 @@ jobs:
       - name: Install system dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y poppler-utils
+          sudo apt-get install -y poppler-utils docker.io
 
       - name: Verify Poppler installation
         run: |
           pdftoppm -v
 
+      - name: Setup GROBID service
+        run: |
+          echo "Starting GROBID Docker container..."
+          docker run -d -p 8070:8070 --name grobid lfoppiano/grobid:0.8.0
+          echo "Waiting for GROBID to be ready (max 60s)..."
+          timeout 60 bash -c 'until curl -s http://localhost:8070/api/isalive > /dev/null; do sleep 2; done' || echo "GROBID timeout, continuing anyway"
+          curl -s http://localhost:8070/api/isalive && echo "✅ GROBID is ready" || echo "⚠️ GROBID not ready"
+
       - name: Install dependencies
         run: pip install -r requirements.txt
+
+      - name: Network diagnostics
+        run: |
+          echo "=== Network connectivity check ==="
+          echo "Testing arXiv..."
+          curl -I -m 10 https://export.arxiv.org/api/query || echo "❌ arXiv unreachable"
+          echo ""
+          echo "Testing HuggingFace..."
+          curl -I -m 10 https://huggingface.co || echo "❌ HuggingFace unreachable"
+          echo ""
+          echo "Testing TechEmpower..."
+          curl -I -m 10 https://www.techempower.com || echo "❌ TechEmpower unreachable"
+          echo ""
+          echo "=== DNS resolution ==="
+          nslookup export.arxiv.org || true
+          nslookup huggingface.co || true
+          echo ""
+          echo "=== Network route test ==="
+          traceroute -m 5 export.arxiv.org || true
 
       - name: Run pipeline
         env:
@@ -58,7 +85,48 @@ jobs:
           REDIS_URL: redis://localhost:6379/0
           LOG_LEVEL: INFO
         run: |
-          python -m src.main
+          python -m src.main || (echo "First attempt failed, retrying in 30s..." && sleep 30 && python -m src.main)
+
+      - name: Check collection success rate
+        if: success()
+        run: |
+          echo "=== Collection Success Rate Analysis ==="
+          if [ -f logs/benchscope.log ]; then
+            echo "Collector results:"
+            grep "✓.*Collector:" logs/benchscope.log || true
+            echo ""
+            echo "Collection summary:"
+            grep "采集: .*条" logs/benchscope.log | tail -1 || true
+            grep "实际入库: .*条" logs/benchscope.log | tail -1 || true
+            echo ""
+            echo "Error/Warning count:"
+            echo "Errors: $(grep -c '\[ERROR\]' logs/benchscope.log || echo 0)"
+            echo "Warnings: $(grep -c '\[WARNING\]' logs/benchscope.log || echo 0)"
+            echo ""
+            echo "Network issues:"
+            grep -i "timeout\|unreachable\|connection" logs/benchscope.log | tail -10 || echo "No network issues found"
+          fi
+
+      - name: Analyze failures
+        if: failure()
+        run: |
+          echo "=== Pipeline failed, analyzing logs ==="
+          if [ -f logs/benchscope.log ]; then
+            echo "Last 100 lines of log:"
+            tail -100 logs/benchscope.log
+            echo ""
+            echo "Error summary:"
+            grep -i "error\\|timeout\\|failed" logs/benchscope.log | tail -20 || true
+            echo ""
+            echo "Collector status:"
+            grep "✓.*Collector:" logs/benchscope.log || true
+          fi
+
+      - name: Cleanup GROBID
+        if: always()
+        run: |
+          docker stop grobid || true
+          docker rm grobid || true
 
       - name: Upload logs
         if: always()

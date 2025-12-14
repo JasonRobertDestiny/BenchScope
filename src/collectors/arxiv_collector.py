@@ -5,10 +5,10 @@ from __future__ import annotations
 import asyncio
 import logging
 from datetime import datetime, timedelta
-from pathlib import Path
 from typing import List, Optional, Tuple
 
 import arxiv
+import requests
 
 from src.common import constants
 from src.common.url_extractor import URLExtractor
@@ -40,25 +40,68 @@ class ArxivCollector:
             logger.info("arXiv采集器已禁用,直接返回空列表")
             return []
 
+        retry_delays = constants.ARXIV_RETRY_DELAYS_SECONDS
+        last_exc: Exception | None = None
         for attempt in range(1, self.max_retries + 1):
             try:
-                async with asyncio.timeout(self.timeout):
-                    results = await asyncio.to_thread(self._fetch_results)
+                results = await asyncio.to_thread(self._fetch_results)
                 return await self._to_candidates(results)
-            except asyncio.TimeoutError:
-                logger.warning(
-                    "arXiv查询超时,准备重试(%s/%s)", attempt, self.max_retries
+            except (TimeoutError, requests.exceptions.Timeout) as exc:
+                last_exc = exc
+                if attempt >= self.max_retries:
+                    break
+                delay = (
+                    retry_delays[attempt - 1]
+                    if attempt - 1 < len(retry_delays)
+                    else retry_delays[-1]
                 )
+                logger.warning(
+                    "arXiv查询超时,准备重试(%s/%s), 等待%s秒后重试, 错误: %r",
+                    attempt,
+                    self.max_retries,
+                    delay,
+                    exc,
+                )
+                await asyncio.sleep(delay)
             except Exception as exc:  # noqa: BLE001
-                logger.error("arXiv采集失败(%s/%s): %s", attempt, self.max_retries, exc)
+                last_exc = exc
+                if attempt >= self.max_retries:
+                    break
+                delay = (
+                    retry_delays[attempt - 1]
+                    if attempt - 1 < len(retry_delays)
+                    else retry_delays[-1]
+                )
+                logger.error(
+                    "arXiv采集失败(%s/%s): %s, %s秒后重试",
+                    attempt,
+                    self.max_retries,
+                    exc,
+                    delay,
+                )
+                await asyncio.sleep(delay)
 
-            await asyncio.sleep(attempt)
-
-        logger.error("arXiv连续失败,返回空列表")
+        logger.error(
+            "arXiv连续失败%s次,返回空列表, 超时配置=%s秒, 最后错误: %r",
+            self.max_retries,
+            self.timeout,
+            last_exc,
+        )
         return []
 
     def _fetch_results(self) -> List[arxiv.Result]:
         """同步执行arXiv查询,供线程池调用"""
+
+        class _TimeoutSession(requests.Session):
+            """给requests.Session注入默认timeout（P15: 避免请求无超时导致线程悬挂）"""
+
+            def __init__(self, timeout_seconds: int) -> None:
+                super().__init__()
+                self._timeout_seconds = timeout_seconds
+
+            def request(self, method: str, url: str, **kwargs):  # type: ignore[override]
+                kwargs.setdefault("timeout", self._timeout_seconds)
+                return super().request(method, url, **kwargs)
 
         query = " OR ".join([f'all:"{kw}"' for kw in self.keywords])
         cat_filter = " OR ".join([f"cat:{cat}" for cat in self.categories])
@@ -68,7 +111,13 @@ class ArxivCollector:
             sort_by=arxiv.SortCriterion.SubmittedDate,
             sort_order=arxiv.SortOrder.Descending,
         )
-        return list(search.results())
+        client = arxiv.Client(
+            page_size=min(self.max_results, constants.ARXIV_PAGE_SIZE_LIMIT),
+            num_retries=0,
+        )
+        # P15: arxiv.py内部requests默认无timeout，这里强制注入，避免asyncio超时取消后线程仍继续跑
+        client._session = _TimeoutSession(timeout_seconds=self.timeout)
+        return list(client.results(search))
 
     async def _to_candidates(self, results: List[arxiv.Result]) -> List[RawCandidate]:
         """将arXiv返回转成内部数据结构"""
@@ -121,7 +170,9 @@ class ArxivCollector:
         return candidates
 
     @staticmethod
-    def _extract_authors_institutions(paper: arxiv.Result) -> Tuple[Optional[str], Optional[str]]:
+    def _extract_authors_institutions(
+        paper: arxiv.Result,
+    ) -> Tuple[Optional[str], Optional[str]]:
         """提取arXiv作者与机构信息"""
 
         authors: List[str] = []
@@ -143,6 +194,8 @@ class ArxivCollector:
             if aff_text:
                 institutions.add(aff_text)
 
-        authors_str = ", ".join(authors[: constants.MAX_EXTRACTED_AUTHORS]) if authors else None
+        authors_str = (
+            ", ".join(authors[: constants.MAX_EXTRACTED_AUTHORS]) if authors else None
+        )
         institutions_str = ", ".join(sorted(institutions)) if institutions else None
         return authors_str, institutions_str

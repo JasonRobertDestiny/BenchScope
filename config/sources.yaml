@@ -9,7 +9,7 @@ arxiv:
   enabled: true
   max_results: 100     # 增加到100条，确保不漏高质量论文
   lookback_hours: 168  # 7天窗口，提升新鲜度，减少重复
-  timeout_seconds: 20  # 增大超时，适应复杂查询
+  timeout_seconds: 30  # P15: arXiv响应偏慢,提高超时避免全部超时
   max_retries: 2       # 减少重试次数，避免长时间阻塞
 
   # Phase 11: 扩展通用Benchmark术语 + MGX场景关键词
@@ -219,6 +219,7 @@ github:
 huggingface:
   enabled: true
   api_url: "https://huggingface.co/api/datasets"
+  timeout_seconds: 20  # P15: HuggingFace API超时配置
 
   # Phase 7: 收敛关键词+任务类别
   keywords:
@@ -291,7 +292,7 @@ twitter:
 techempower:
   enabled: true
   base_url: "https://tfb-status.techempower.com"
-  timeout_seconds: 15
+  timeout_seconds: 25  # P15: TechEmpower大JSON响应偏慢,提高超时
   min_composite_score: 50.0
 
 dbengines:

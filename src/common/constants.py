@@ -36,8 +36,16 @@ PDF_MIN_P2_SECTIONS: Final[int] = 1
 
 # ---- Collector 配置 ----
 ARXIV_MAX_RESULTS: Final[int] = 50
-ARXIV_TIMEOUT_SECONDS: Final[int] = 10
+ARXIV_TIMEOUT_SECONDS: Final[int] = (
+    30  # P15: arXiv API响应偏慢,实测需15-25秒,提高到30秒
+)
+# P15: HuggingFace API超时配置,实测需10-15秒,设置20秒
+HUGGINGFACE_TIMEOUT_SECONDS: Final[int] = 20
+HUGGINGFACE_HTTP_MAX_RETRIES: Final[int] = 2  # P15: 网络抖动时最多重试1次
+HUGGINGFACE_HTTP_RETRY_DELAY_SECONDS: Final[float] = 2.0  # P15: HuggingFace重试等待(秒)
 ARXIV_MAX_RETRIES: Final[int] = 3
+ARXIV_RETRY_DELAYS_SECONDS: Final[tuple[int, ...]] = (5, 10)  # P15: 重试间隔(秒)
+ARXIV_PAGE_SIZE_LIMIT: Final[int] = 2000  # arXiv API单页最大结果数上限
 ARXIV_LOOKBACK_HOURS: Final[int] = 168  # 7天窗口，相关论文发布频率低
 ARXIV_KEYWORDS: Final[list[str]] = [
     # P0 - 编程
@@ -248,6 +256,7 @@ BENCHMARK_KEYWORDS: Final[list[str]] = [
     "code generation",
 ]
 
+HUGGINGFACE_DATASETS_API_URL: Final[str] = "https://huggingface.co/api/datasets"
 HUGGINGFACE_KEYWORDS: Final[list[str]] = [
     "code",
     "programming",
@@ -292,7 +301,9 @@ TWITTER_TIER2_QUERIES: Final[list[str]] = [
 ]
 
 TECHEMPOWER_BASE_URL: Final[str] = "https://tfb-status.techempower.com"
-TECHEMPOWER_TIMEOUT_SECONDS: Final[int] = 15
+TECHEMPOWER_TIMEOUT_SECONDS: Final[int] = (
+    25  # P15: TechEmpower大JSON响应慢,从15秒提高到25秒
+)
 TECHEMPOWER_MIN_COMPOSITE_SCORE: Final[float] = 50.0
 TECHEMPOWER_SCORE_SCALE: Final[float] = 100000.0  # 将req/s换算为分数
 
@@ -543,7 +554,9 @@ ALGO_METHOD_PHRASES: Final[list[str]] = [
 ]
 
 # ---- Scorer 配置 ----
-LLM_DEFAULT_MODEL: Final[str] = "gpt-4o-mini"  # 成本优化: $8/天→$0.5/天 (-94%), 评分质量足够用于预筛选
+LLM_DEFAULT_MODEL: Final[str] = (
+    "gpt-4o-mini"  # 成本优化: $8/天→$0.5/天 (-94%), 评分质量足够用于预筛选
+)
 LLM_MODEL: Final[str] = LLM_DEFAULT_MODEL
 LLM_TIMEOUT_SECONDS: Final[int] = 30
 LLM_CACHE_TTL_SECONDS: Final[int] = 7 * 24 * 3600
@@ -718,7 +731,9 @@ FEISHU_LOW_PICK_PER_SOURCE: Final[dict[str, int]] = {
 }
 # 推送过滤与质量控制
 PUSH_MAX_AGE_DAYS: Final[int] = 30  # 超过30天仅保留高分(>=8)的历史优质项
-PUSH_RELEVANCE_FLOOR: Final[float] = 6.0  # P14: 与入库阈值RELEVANCE_HARD_FLOOR统一，避免入库后被推送过滤
+PUSH_RELEVANCE_FLOOR: Final[float] = (
+    6.0  # P14: 与入库阈值RELEVANCE_HARD_FLOOR统一，避免入库后被推送过滤
+)
 PUSH_TOTAL_CAP: Final[int] = 15  # 单次推送总条数上限
 
 # 推送卡片UX（方案B：两分区）
