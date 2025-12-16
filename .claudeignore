@@ -1,0 +1,20 @@
+# 忽略历史spec文档（减少扫描）
+.claude/specs/benchmark-intelligence-agent/PHASE*.md
+.claude/specs/benchmark-intelligence-agent/CODEX-*.md
+.claude/specs/benchmark-intelligence-agent/0*.md
+
+# 忽略日志和临时文件
+logs/
+*.log
+fallback.db
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# 忽略虚拟环境
+.venv/
+venv/
+
+# 忽略IDE
+.idea/
+.vscode/
