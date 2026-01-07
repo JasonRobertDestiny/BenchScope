@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import sqlite3
 from datetime import datetime
 from typing import Optional
@@ -16,8 +17,11 @@ from src.common.url_utils import canonicalize_url
 
 logger = logging.getLogger(__name__)
 
-# 配置常量
-NOTIFICATION_HISTORY_DB = "notification_history.db"
+# P18修复：使用绝对路径，避免不同cwd导致创建空库
+_PROJECT_ROOT = os.path.dirname(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+)
+NOTIFICATION_HISTORY_DB = os.path.join(_PROJECT_ROOT, "notification_history.db")
 
 
 class NotificationHistory:

@@ -712,12 +712,16 @@ class FeishuStorage:
                     if url_key:
                         source_field = self.FIELD_MAPPING.get("source", "来源")
                         source_value = fields.get(source_field, "default")
+                        # P18修复：规范化source字段，飞书可能存为列表或大写
+                        if isinstance(source_value, list):
+                            source_value = source_value[0] if source_value else "default"
+                        source_value = str(source_value).lower()
                         record_item: dict[str, Any] = {
                             "url": str(url_value),
                             "url_key": url_key,
                             "publish_date": publish_date,
                             "created_at": created_at,
-                            "source": str(source_value),
+                            "source": source_value,
                         }
                         records.append(record_item)
 

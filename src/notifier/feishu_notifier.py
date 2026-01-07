@@ -86,38 +86,65 @@ class FeishuNotifier:
 
         covered_domains = self._collect_domains(high_priority + medium_priority)
 
+        # P18修复：每次成功推送后立即记录，避免中途失败导致重复推送
+        successfully_notified: list[ScoredCandidate] = []
+
         # 1. 推送所有高优先级卡片
         for candidate in high_priority:
-            await self.send_card("🔥 发现高质量Benchmark候选", candidate)
+            try:
+                await self.send_card("发现高质量Benchmark候选", candidate)
+                # 立即记录成功推送的URL
+                self._record_notified(candidate)
+                successfully_notified.append(candidate)
+            except Exception as e:
+                logger.warning("高优卡片推送失败，跳过: %s - %s", candidate.title[:30], e)
             await asyncio.sleep(constants.FEISHU_RATE_LIMIT_DELAY)
 
-        # 2. 推送中优先级摘要 (新增)
+        # 2. 推送中优先级摘要
         if medium_priority:
-            await self._send_medium_priority_summary(
-                medium_priority, low_priority, covered_domains
-            )
+            try:
+                await self._send_medium_priority_summary(
+                    medium_priority, low_priority, covered_domains
+                )
+                # 摘要推送成功后记录所有中优URL
+                for c in medium_priority:
+                    self._record_notified(c)
+                    successfully_notified.append(c)
+            except Exception as e:
+                logger.warning("中优摘要推送失败: %s", e)
             await asyncio.sleep(constants.FEISHU_RATE_LIMIT_DELAY)
 
         # 3. 推送统计摘要卡片 (支持markdown)
-        summary_candidates = self._dedup_by_url(high_priority + medium_priority)
-        summary_card = self._build_summary_card(
-            summary_candidates, high_priority, medium_priority
-        )
-        await self._send_webhook(summary_card)
+        if successfully_notified:
+            summary_candidates = self._dedup_by_url(successfully_notified)
+            high_count = sum(1 for c in successfully_notified if c.priority == "high")
+            medium_count = len(successfully_notified) - high_count
+            summary_card = self._build_summary_card(
+                summary_candidates,
+                [c for c in successfully_notified if c.priority == "high"],
+                [c for c in successfully_notified if c.priority != "high"],
+            )
+            try:
+                await self._send_webhook(summary_card)
+            except Exception as e:
+                logger.warning("统计摘要推送失败: %s", e)
 
         # 4. 日志记录推送统计
+        high_sent = sum(1 for c in successfully_notified if c.priority == "high")
+        medium_sent = len(successfully_notified) - high_sent
         logger.info(
-            f"✅ 推送完成: 高优先级{len(high_priority)}条(卡片), "
-            f"中优先级{len(medium_priority)}条(摘要)"
+            "推送完成: 高优先级%d条(卡片), 中优先级%d条(摘要), 共记录%d条URL",
+            high_sent,
+            medium_sent,
+            len(successfully_notified),
         )
 
-        # 5. 更新通知历史：记录已推送的URL，后续采集将自动过滤
-        notified_items = [
-            (c.url, c.title) for c in (high_priority + medium_priority) if c.url
-        ]
-        if notified_items:
-            updated_count = self.notification_history.batch_increment(notified_items)
-            logger.info("通知历史更新: 记录%d条已推送URL", updated_count)
+    def _record_notified(self, candidate: ScoredCandidate) -> None:
+        """P18新增：立即记录单条成功推送的URL，避免批量记录导致的丢失"""
+        if candidate.url:
+            self.notification_history.increment_notify_count(
+                candidate.url, candidate.title
+            )
 
     async def send_card(self, title: str, candidate: ScoredCandidate) -> None:
         """发送单条候选的卡片消息"""
