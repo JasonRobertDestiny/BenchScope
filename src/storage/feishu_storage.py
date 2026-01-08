@@ -319,6 +319,11 @@ class FeishuStorage:
             data = resp.json()
             token = data.get("tenant_access_token")
             if not token:
+                # 打印飞书业务错误码，便于定位 app_id/app_secret/租户问题；不输出敏感字段
+                code = data.get("code")
+                msg = data.get("msg")
+                if code or msg:
+                    logger.error("飞书token获取失败: code=%s, msg=%s", code, msg)
                 raise FeishuAPIError("飞书token获取失败，返回空token")
             self.access_token = token
             expire_seconds = int(data.get("expire", 7200)) - 300
