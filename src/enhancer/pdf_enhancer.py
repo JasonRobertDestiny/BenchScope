@@ -44,7 +44,9 @@ class PDFContent:
     title: str
     abstract: str  # 完整摘要（预期 500-1000 字）
     sections: Dict[str, str]  # {"Introduction": "...", "Methods": "...", ...}
-    authors_affiliations: List[Tuple[str, str]]  # [("Alice Zhang", "Stanford University"), ...]
+    authors_affiliations: List[
+        Tuple[str, str]
+    ]  # [("Alice Zhang", "Stanford University"), ...]
     references: List[str]  # 引用文献列表（原始字符串）
     evaluation_summary: Optional[str] = None  # Evaluation 部分摘要（最多 2000 字）
     dataset_summary: Optional[str] = None  # Dataset 部分摘要（最多 1000 字）
@@ -137,12 +139,18 @@ class PDFEnhancer:
             async with semaphore:
                 results[index] = await self.enhance_candidate(candidate)
 
-        tasks = [asyncio.create_task(_enhance_with_lock(idx, cand)) for idx, cand in enumerate(candidates)]
+        tasks = [
+            asyncio.create_task(_enhance_with_lock(idx, cand))
+            for idx, cand in enumerate(candidates)
+        ]
         for task in asyncio.as_completed(tasks):
             await task
 
         # 并发执行后保持输入顺序，与调用方解耦
-        return [item if item is not None else candidates[idx] for idx, item in enumerate(results)]
+        return [
+            item if item is not None else candidates[idx]
+            for idx, item in enumerate(results)
+        ]
 
     async def _download_pdf(self, arxiv_id: str) -> Optional[Path]:
         """下载 arXiv PDF（带缓存）。"""
@@ -392,7 +400,9 @@ class PDFEnhancer:
                 return section_text[:max_len]
         return None
 
-    def _extract_urls_from_pdf(self, pdf_content: PDFContent) -> Dict[str, Optional[str]]:
+    def _extract_urls_from_pdf(
+        self, pdf_content: PDFContent
+    ) -> Dict[str, Optional[str]]:
         """从PDF正文提取 GitHub/数据集/论文 URL。
 
         优先级：Code/Data Availability -> Evaluation/Dataset -> Intro/Method -> Conclusion -> 其他章节。
@@ -460,7 +470,9 @@ class PDFEnhancer:
                     urls["github_url"] = normalized
                     continue
 
-            if not urls["dataset_url"] and any(domain in url_lower for domain in dataset_domains):
+            if not urls["dataset_url"] and any(
+                domain in url_lower for domain in dataset_domains
+            ):
                 urls["dataset_url"] = url
                 continue
 
@@ -497,13 +509,18 @@ class PDFEnhancer:
 
         owner, repo = match.groups()
         api_url = f"https://api.github.com/repos/{owner}/{repo}"
-        headers = {"Accept": "application/vnd.github+json", "User-Agent": "BenchScope/1.0"}
+        headers = {
+            "Accept": "application/vnd.github+json",
+            "User-Agent": "BenchScope/1.0",
+        }
         token = os.getenv("GITHUB_TOKEN")
         if token:
             headers["Authorization"] = f"Bearer {token}"
 
         try:
-            async with httpx.AsyncClient(timeout=constants.GITHUB_METADATA_TIMEOUT_SECONDS) as client:
+            async with httpx.AsyncClient(
+                timeout=constants.GITHUB_METADATA_TIMEOUT_SECONDS
+            ) as client:
                 response = await client.get(api_url, headers=headers)
                 response.raise_for_status()
                 data = response.json()
@@ -578,15 +595,23 @@ class PDFEnhancer:
             candidate.paper_url = extracted_urls["paper_url"]
 
         # 可选：GitHub 元数据补充（stars/许可证/活跃度），失败不阻断
-        if candidate.github_url and (candidate.github_stars is None or candidate.license_type is None):
+        if candidate.github_url and (
+            candidate.github_stars is None or candidate.license_type is None
+        ):
             github_meta = await self._fetch_github_metadata(candidate.github_url)
             if github_meta:
-                candidate.github_stars = candidate.github_stars or github_meta.get("github_stars")
-                candidate.license_type = candidate.license_type or github_meta.get("license_type")
+                candidate.github_stars = candidate.github_stars or github_meta.get(
+                    "github_stars"
+                )
+                candidate.license_type = candidate.license_type or github_meta.get(
+                    "license_type"
+                )
                 if github_meta.get("github_updated_at"):
                     metadata["github_updated_at"] = github_meta["github_updated_at"]
                 if github_meta.get("github_open_issues") is not None:
-                    metadata["github_open_issues"] = str(github_meta["github_open_issues"])
+                    metadata["github_open_issues"] = str(
+                        github_meta["github_open_issues"]
+                    )
 
         candidate.raw_metadata = metadata
 

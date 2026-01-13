@@ -34,7 +34,9 @@ class TechEmpowerCollector:
         self.settings = settings or get_settings()
         cfg = self.settings.sources.techempower
         self.enabled = cfg.enabled
-        self.base_url = cfg.base_url.rstrip("/") if cfg.base_url else constants.TECHEMPOWER_BASE_URL
+        self.base_url = (
+            cfg.base_url.rstrip("/") if cfg.base_url else constants.TECHEMPOWER_BASE_URL
+        )
         self.timeout = cfg.timeout_seconds
         self.min_composite_score = cfg.min_composite_score
         self.score_scale = constants.TECHEMPOWER_SCORE_SCALE
@@ -68,7 +70,9 @@ class TechEmpowerCollector:
                         logger.warning("TechEmpower原始数据为空, uuid=%s", run_uuid)
                         continue
 
-                    candidates.extend(self._build_candidates(run, run_meta, raw_payload))
+                    candidates.extend(
+                        self._build_candidates(run, run_meta, raw_payload)
+                    )
         except httpx.TimeoutException:
             logger.error("TechEmpower请求超时(>%ss)", self.timeout)
             return []
@@ -251,8 +255,12 @@ class TechEmpowerCollector:
             "database": str(meta_entry.get("database") or ""),
             "orm": str(meta_entry.get("orm") or ""),
             "notes": str(meta_entry.get("notes") or ""),
-            "benchmark_name": str(run_meta.get("name") or latest_run.get("environment", "")),
-            "benchmark_date": str(run_meta.get("startTime") or latest_run.get("time", "")),
+            "benchmark_name": str(
+                run_meta.get("name") or latest_run.get("environment", "")
+            ),
+            "benchmark_date": str(
+                run_meta.get("startTime") or latest_run.get("time", "")
+            ),
             "environment": str(latest_run.get("environment", "")),
             "composite_score": f"{composite_score:.2f}",
         }

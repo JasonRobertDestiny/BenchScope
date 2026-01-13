@@ -39,7 +39,8 @@ class NotificationHistory:
         """Create notification_history table if not exists."""
         try:
             with sqlite3.connect(self.db_path) as conn:
-                conn.execute("""
+                conn.execute(
+                    """
                     CREATE TABLE IF NOT EXISTS notification_history (
                         url_key TEXT PRIMARY KEY,
                         notify_count INTEGER DEFAULT 0,
@@ -47,7 +48,8 @@ class NotificationHistory:
                         last_notified TEXT,
                         title TEXT
                     )
-                """)
+                """
+                )
                 conn.commit()
             logger.debug("Notification history table ready: %s", self.db_path)
         except Exception as e:
@@ -63,7 +65,7 @@ class NotificationHistory:
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.execute(
                     "SELECT notify_count FROM notification_history WHERE url_key = ?",
-                    (url_key,)
+                    (url_key,),
                 )
                 row = cursor.fetchone()
                 return row[0] if row else 0
@@ -80,9 +82,7 @@ class NotificationHistory:
         count = self.get_notify_count(url)
         return count == 0  # 只有从未通知过的才允许推送
 
-    def increment_notify_count(
-        self, url: str, title: Optional[str] = None
-    ) -> int:
+    def increment_notify_count(self, url: str, title: Optional[str] = None) -> int:
         """Increment notification count for a URL. Returns new count.
 
         每次成功发送通知后调用此方法更新计数。
@@ -98,24 +98,30 @@ class NotificationHistory:
                 # 检查是否存在
                 cursor = conn.execute(
                     "SELECT notify_count FROM notification_history WHERE url_key = ?",
-                    (url_key,)
+                    (url_key,),
                 )
                 row = cursor.fetchone()
 
                 if row:
                     new_count = row[0] + 1
-                    conn.execute("""
+                    conn.execute(
+                        """
                         UPDATE notification_history
                         SET notify_count = ?, last_notified = ?, title = COALESCE(?, title)
                         WHERE url_key = ?
-                    """, (new_count, now, title, url_key))
+                    """,
+                        (new_count, now, title, url_key),
+                    )
                 else:
                     new_count = 1
-                    conn.execute("""
+                    conn.execute(
+                        """
                         INSERT INTO notification_history
                         (url_key, notify_count, first_notified, last_notified, title)
                         VALUES (?, ?, ?, ?, ?)
-                    """, (url_key, new_count, now, now, title or ""))
+                    """,
+                        (url_key, new_count, now, now, title or ""),
+                    )
 
                 conn.commit()
                 return new_count
@@ -123,9 +129,7 @@ class NotificationHistory:
             logger.warning("Failed to increment notify count for %s: %s", url_key, e)
             return 0
 
-    def batch_increment(
-        self, items: list[tuple[str, Optional[str]]]
-    ) -> int:
+    def batch_increment(self, items: list[tuple[str, Optional[str]]]) -> int:
         """Batch increment notification counts.
 
         Args:
@@ -149,24 +153,30 @@ class NotificationHistory:
 
                     cursor = conn.execute(
                         "SELECT notify_count FROM notification_history WHERE url_key = ?",
-                        (url_key,)
+                        (url_key,),
                     )
                     row = cursor.fetchone()
 
                     if row:
                         new_count = row[0] + 1
-                        conn.execute("""
+                        conn.execute(
+                            """
                             UPDATE notification_history
                             SET notify_count = ?, last_notified = ?,
                                 title = COALESCE(?, title)
                             WHERE url_key = ?
-                        """, (new_count, now, title, url_key))
+                        """,
+                            (new_count, now, title, url_key),
+                        )
                     else:
-                        conn.execute("""
+                        conn.execute(
+                            """
                             INSERT INTO notification_history
                             (url_key, notify_count, first_notified, last_notified, title)
                             VALUES (?, ?, ?, ?, ?)
-                        """, (url_key, 1, now, now, title or ""))
+                        """,
+                            (url_key, 1, now, now, title or ""),
+                        )
 
                     success_count += 1
 
@@ -192,13 +202,15 @@ class NotificationHistory:
         """Get notification history statistics."""
         try:
             with sqlite3.connect(self.db_path) as conn:
-                cursor = conn.execute("""
+                cursor = conn.execute(
+                    """
                     SELECT
                         COUNT(*) as total,
                         SUM(CASE WHEN notify_count >= 1 THEN 1 ELSE 0 END) as notified_once,
                         MAX(notify_count) as max_count
                     FROM notification_history
-                """)
+                """
+                )
                 row = cursor.fetchone()
                 return {
                     "total_tracked": row[0] or 0,

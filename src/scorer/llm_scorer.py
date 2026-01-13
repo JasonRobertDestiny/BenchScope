@@ -485,21 +485,13 @@ class UnifiedBenchmarkExtraction(BaseModel):
     relevance_score: float = Field(..., ge=0.0, le=10.0)
 
     # 5维详细推理（每个≥150字符）
-    activity_reasoning: str = Field(
-        ..., min_length=constants.LLM_REASONING_MIN_CHARS
-    )
+    activity_reasoning: str = Field(..., min_length=constants.LLM_REASONING_MIN_CHARS)
     reproducibility_reasoning: str = Field(
         ..., min_length=constants.LLM_REASONING_MIN_CHARS
     )
-    license_reasoning: str = Field(
-        ..., min_length=constants.LLM_REASONING_MIN_CHARS
-    )
-    novelty_reasoning: str = Field(
-        ..., min_length=constants.LLM_REASONING_MIN_CHARS
-    )
-    relevance_reasoning: str = Field(
-        ..., min_length=constants.LLM_REASONING_MIN_CHARS
-    )
+    license_reasoning: str = Field(..., min_length=constants.LLM_REASONING_MIN_CHARS)
+    novelty_reasoning: str = Field(..., min_length=constants.LLM_REASONING_MIN_CHARS)
+    relevance_reasoning: str = Field(..., min_length=constants.LLM_REASONING_MIN_CHARS)
 
     # 后端专项评分（仅后端Benchmark）
     backend_mgx_relevance: float = Field(default=0.0, ge=0.0, le=10.0)
@@ -540,9 +532,7 @@ class UnifiedBenchmarkExtraction(BaseModel):
                 data.get("backend_engineering_value", 0) > 0
             )
         if needs_backend_reasoning and len(v) < required:
-            raise ValueError(
-                f"后端推理字段必须≥{required}字符，当前{len(v)}字符"
-            )
+            raise ValueError(f"后端推理字段必须≥{required}字符，当前{len(v)}字符")
         return v
 
 
@@ -581,9 +571,7 @@ class LLMScorer:
     def _cache_key(self, candidate: RawCandidate) -> str:
         """生成Redis缓存键（基于标题+URL的MD5）"""
         key_str = f"v2:{candidate.title}:{candidate.url}"  # v2表示新版prompt
-        digest = hashlib.md5(
-            key_str.encode(), usedforsecurity=False
-        ).hexdigest()
+        digest = hashlib.md5(key_str.encode(), usedforsecurity=False).hexdigest()
         return f"{constants.REDIS_KEY_PREFIX}unified_score:{digest}"
 
     async def _get_cached_score(
@@ -624,17 +612,45 @@ class LLMScorer:
 
         # 提取PDF增强内容
         raw_metadata = candidate.raw_metadata or {}
-        introduction_summary = raw_metadata.get("introduction_summary") or "未提供（论文无Introduction章节或PDF解析失败）"
-        method_summary = raw_metadata.get("method_summary") or "未提供（论文无Method章节或PDF解析失败）"
-        evaluation_summary = raw_metadata.get("evaluation_summary") or "未提供（论文无Evaluation章节或PDF解析失败）"
-        dataset_summary = raw_metadata.get("dataset_summary") or "未提供（论文无Dataset章节或PDF解析失败）"
-        baselines_summary = raw_metadata.get("baselines_summary") or "未提供（论文无Baselines章节或PDF解析失败）"
-        conclusion_summary = raw_metadata.get("conclusion_summary") or "未提供（论文无Conclusion章节或PDF解析失败）"
+        introduction_summary = (
+            raw_metadata.get("introduction_summary")
+            or "未提供（论文无Introduction章节或PDF解析失败）"
+        )
+        method_summary = (
+            raw_metadata.get("method_summary")
+            or "未提供（论文无Method章节或PDF解析失败）"
+        )
+        evaluation_summary = (
+            raw_metadata.get("evaluation_summary")
+            or "未提供（论文无Evaluation章节或PDF解析失败）"
+        )
+        dataset_summary = (
+            raw_metadata.get("dataset_summary")
+            or "未提供（论文无Dataset章节或PDF解析失败）"
+        )
+        baselines_summary = (
+            raw_metadata.get("baselines_summary")
+            or "未提供（论文无Baselines章节或PDF解析失败）"
+        )
+        conclusion_summary = (
+            raw_metadata.get("conclusion_summary")
+            or "未提供（论文无Conclusion章节或PDF解析失败）"
+        )
 
         # 原始提取数据
-        raw_metrics = ", ".join(candidate.raw_metrics or []) if candidate.raw_metrics else "未提取"
-        raw_baselines = ", ".join(candidate.raw_baselines or []) if candidate.raw_baselines else "未提取"
-        raw_authors = candidate.raw_authors or (", ".join(candidate.authors or []) if candidate.authors else "未提取")
+        raw_metrics = (
+            ", ".join(candidate.raw_metrics or [])
+            if candidate.raw_metrics
+            else "未提取"
+        )
+        raw_baselines = (
+            ", ".join(candidate.raw_baselines or [])
+            if candidate.raw_baselines
+            else "未提取"
+        )
+        raw_authors = candidate.raw_authors or (
+            ", ".join(candidate.authors or []) if candidate.authors else "未提取"
+        )
         raw_institutions = candidate.raw_institutions or "未提取"
         raw_dataset = candidate.raw_dataset_size or "未提取"
 
@@ -646,7 +662,11 @@ class LLMScorer:
             url=candidate.url,
             abstract=abstract,
             github_stars=candidate.github_stars or "未提供",
-            publish_date=candidate.publish_date.strftime("%Y-%m-%d") if candidate.publish_date else "未知",
+            publish_date=(
+                candidate.publish_date.strftime("%Y-%m-%d")
+                if candidate.publish_date
+                else "未知"
+            ),
             github_url=candidate.github_url or "未提供",
             dataset_url=candidate.dataset_url or "未提供",
             paper_url=candidate.paper_url or "未提供",
@@ -669,9 +689,7 @@ class LLMScorer:
         stop=stop_after_attempt(constants.LLM_MAX_RETRIES),
         wait=wait_exponential(multiplier=1, min=2, max=10),
     )
-    async def _call_llm(
-        self, candidate: RawCandidate
-    ) -> UnifiedBenchmarkExtraction:
+    async def _call_llm(self, candidate: RawCandidate) -> UnifiedBenchmarkExtraction:
         """调用LLM获取评分（单次返回所有26个字段）"""
         if not self.client:
             raise RuntimeError("未配置OpenAI接口,无法调用LLM")
@@ -719,10 +737,7 @@ class LLMScorer:
                 extraction = UnifiedBenchmarkExtraction.parse_obj(payload)
             except ValidationError as exc:  # noqa: PERF203
                 violations = self._extract_length_violations(exc, payload)
-                if (
-                    violations
-                    and repair_attempt < constants.LLM_SELF_HEAL_MAX_ATTEMPTS
-                ):
+                if violations and repair_attempt < constants.LLM_SELF_HEAL_MAX_ATTEMPTS:
                     repair_attempt += 1
                     fix_prompt = self._build_length_fix_prompt(violations)
                     messages.append({"role": "assistant", "content": content})
@@ -772,7 +787,7 @@ class LLMScorer:
                     f"当前{total_reasoning_length}字符，要求≥{min_total_chars}字符（差{shortage}字符）。\n\n"
                     "请保留所有字段并重新输出完整JSON，通过以下方式扩写推理段落：\n"
                     "1. 补充具体数据（GitHub stars、PR数量、提交时间、算力需求等）\n"
-                    "2. 展开论证结构：\"证据→分析→结论\"，每个推理段落至少2-3句话\n"
+                    '2. 展开论证结构："证据→分析→结论"，每个推理段落至少2-3句话\n'
                     "3. 明确指出潜在风险和不足，不要只写优点\n"
                     "4. 如果信息不足，写明推断依据与局限性\n\n"
                     "只输出符合Schema的纯JSON，不要添加额外解释或省略字段。"
@@ -799,8 +814,6 @@ class LLMScorer:
                 )
 
             return extraction
-
-
 
     def _load_payload(self, content: str) -> dict[str, Any]:
         """解析LLM响应文本为JSON对象"""
@@ -853,9 +866,7 @@ class LLMScorer:
 
         return violations
 
-    def _build_length_fix_prompt(
-        self, violations: Dict[str, Tuple[int, int]]
-    ) -> str:
+    def _build_length_fix_prompt(self, violations: Dict[str, Tuple[int, int]]) -> str:
         """构造提示语，让LLM扩写字符不足的推理字段"""
         ordered_fields: List[str] = []
         for field in REASONING_FIELD_ORDER:
@@ -872,9 +883,7 @@ class LLMScorer:
         for field in ordered_fields:
             required, current = violations[field]
             label = REASONING_FIELD_LABELS.get(field, field)
-            tips.append(
-                f"- {label}: 当前{current}字符，至少{required}字符。"
-            )
+            tips.append(f"- {label}: 当前{current}字符，至少{required}字符。")
         tips.append("只输出符合Schema的纯JSON，不要添加额外解释或省略字段。")
         return "\n".join(tips)
 
@@ -948,7 +957,11 @@ class LLMScorer:
         # 合并指标信息
         metrics = extraction.metrics or candidate.evaluation_metrics
         # 机构信息
-        institution = extraction.institution if extraction.institution != "Unknown" else candidate.raw_institutions
+        institution = (
+            extraction.institution
+            if extraction.institution != "Unknown"
+            else candidate.raw_institutions
+        )
         # 数据集规模描述
         dataset_size_desc = (
             extraction.dataset_size_description
@@ -994,8 +1007,10 @@ class LLMScorer:
             paper_url=extraction.paper_url or candidate.paper_url,
             task_type=extraction.task_type,
             license_type=extraction.license_type,
-            evaluation_metrics=extraction.evaluation_metrics or candidate.evaluation_metrics,
-            reproduction_script_url=extraction.reproduction_script_url or candidate.reproduction_script_url,
+            evaluation_metrics=extraction.evaluation_metrics
+            or candidate.evaluation_metrics,
+            reproduction_script_url=extraction.reproduction_script_url
+            or candidate.reproduction_script_url,
             # 5维评分
             activity_score=extraction.activity_score,
             reproducibility_score=extraction.reproducibility_score,

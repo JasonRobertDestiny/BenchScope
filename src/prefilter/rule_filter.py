@@ -73,9 +73,17 @@ def _has_benchmark_characteristics(candidate: RawCandidate) -> bool:
 
     if has_exclude_pattern:
         # 有排除模式时，必须有强Benchmark信号才通过
-        strong_signals = ["benchmark", "evaluation", "leaderboard", "test set", "dataset"]
+        strong_signals = [
+            "benchmark",
+            "evaluation",
+            "leaderboard",
+            "test set",
+            "dataset",
+        ]
         if not any(s in text for s in strong_signals):
-            logger.debug("排除: 有排除模式但无强Benchmark信号 - %s", candidate.title[:50])
+            logger.debug(
+                "排除: 有排除模式但无强Benchmark信号 - %s", candidate.title[:50]
+            )
             return False
 
     # 正向特征检查
@@ -159,9 +167,7 @@ def _looks_like_algo_paper(candidate: RawCandidate) -> bool:
 
     text = f"{candidate.title} {(candidate.abstract or '')}".lower()
 
-    has_algo_phrase = _contains_any(
-        text, constants.ALGO_METHOD_PHRASES_EXTENDED
-    )
+    has_algo_phrase = _contains_any(text, constants.ALGO_METHOD_PHRASES_EXTENDED)
     has_benchmark_signal = _contains_any(text, constants.BENCHMARK_DATASET_KEYWORDS)
     return has_algo_phrase and not has_benchmark_signal
 
@@ -174,14 +180,16 @@ def _looks_like_technical_report(candidate: RawCandidate) -> bool:
         title_lower, constants.TECHNICAL_REPORT_PATTERNS
     )
     has_model_name = _contains_any(title_lower, constants.MODEL_RELEASE_KEYWORDS)
-    has_benchmark_signal = _contains_any(
-        title_lower, constants.BENCHMARK_TITLE_SIGNALS
-    )
+    has_benchmark_signal = _contains_any(title_lower, constants.BENCHMARK_TITLE_SIGNALS)
 
     if has_tech_report_pattern and not has_benchmark_signal:
         return True
 
-    if has_model_name and "technical report" in title_lower and not has_benchmark_signal:
+    if (
+        has_model_name
+        and "technical report" in title_lower
+        and not has_benchmark_signal
+    ):
         return True
 
     return False
@@ -252,7 +260,9 @@ def prefilter_batch(candidates: List[RawCandidate]) -> List[RawCandidate]:
         k: v for k, v in reason_stats.items() if k not in {"pass"} and v > 0
     }
     reason_text = (
-        ", ".join(f"{k}:{v}" for k, v in sorted(drop_reasons.items(), key=lambda x: -x[1]))
+        ", ".join(
+            f"{k}:{v}" for k, v in sorted(drop_reasons.items(), key=lambda x: -x[1])
+        )
         if drop_reasons
         else "无"
     )
@@ -269,9 +279,7 @@ def prefilter_batch(candidates: List[RawCandidate]) -> List[RawCandidate]:
     if source_stats:
         logger.info("===== 预筛选按来源统计 =====")
         for source, stats in sorted(source_stats.items()):
-            pass_rate = (
-                stats["output"] / stats["input"] * 100 if stats["input"] else 0
-            )
+            pass_rate = stats["output"] / stats["input"] * 100 if stats["input"] else 0
             logger.info(
                 "  %s: %d/%d (通过率%.1f%%)",
                 source.ljust(15),
@@ -323,7 +331,9 @@ def _prefilter_with_reason(candidate: RawCandidate) -> tuple[bool, str]:
 
     # P10新增: 所有来源统一执行Benchmark特征检测（GitHub除外，已有更严格检测）
     if candidate.source != "github" and not _has_benchmark_characteristics(candidate):
-        logger.debug("过滤: 缺少Benchmark特征 - %s (%s)", candidate.title, candidate.source)
+        logger.debug(
+            "过滤: 缺少Benchmark特征 - %s (%s)", candidate.title, candidate.source
+        )
         return False, "no_benchmark_feature"
 
     if candidate.source == "github" and not _is_quality_github_repo(candidate):

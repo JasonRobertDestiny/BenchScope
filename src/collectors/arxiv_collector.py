@@ -11,6 +11,7 @@ import arxiv
 import requests
 
 from src.common import constants
+from src.common.datetime_utils import ensure_utc, get_retry_delay
 from src.common.url_extractor import URLExtractor
 from src.config import Settings, get_settings
 from src.models import RawCandidate
@@ -50,11 +51,7 @@ class ArxivCollector:
                 last_exc = exc
                 if attempt >= self.max_retries:
                     break
-                delay = (
-                    retry_delays[attempt - 1]
-                    if attempt - 1 < len(retry_delays)
-                    else retry_delays[-1]
-                )
+                delay = get_retry_delay(attempt, retry_delays)
                 logger.warning(
                     "arXiv查询超时,准备重试(%s/%s), 等待%s秒后重试, 错误: %r",
                     attempt,
@@ -67,11 +64,7 @@ class ArxivCollector:
                 last_exc = exc
                 if attempt >= self.max_retries:
                     break
-                delay = (
-                    retry_delays[attempt - 1]
-                    if attempt - 1 < len(retry_delays)
-                    else retry_delays[-1]
-                )
+                delay = get_retry_delay(attempt, retry_delays)
                 logger.error(
                     "arXiv采集失败(%s/%s): %s, %s秒后重试",
                     attempt,
@@ -128,11 +121,7 @@ class ArxivCollector:
         candidates: List[RawCandidate] = []
 
         for paper in results:
-            # 确保published是timezone-aware
-            published_dt = paper.published
-            if published_dt and published_dt.tzinfo is None:
-                # 如果是naive datetime，添加UTC时区
-                published_dt = published_dt.replace(tzinfo=timezone.utc)
+            published_dt = ensure_utc(paper.published)
 
             if published_dt and published_dt < cutoff:
                 continue

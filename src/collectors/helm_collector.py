@@ -153,7 +153,6 @@ class HelmCollector:
                 abstract = " | ".join(abstract_parts) if abstract_parts else None
 
                 candidate_url = self._build_group_url(slug)
-                hero_image_url = None
                 metadata = {
                     "release": release,
                     "section": title,

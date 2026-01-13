@@ -2,92 +2,68 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-## Workflow: Dual-Agent (Hard Rule)
-
-This repo uses a dual-agent workflow.
-
-- **Claude Code**: analysis, specs/instructions for Codex, running tests/validation, reviewing results.
-- **Codex**: implements code changes per instruction docs.
-- **Claude Code must not directly modify code**, especially `*.py` files.
-
-Instruction docs live in: `.claude/specs/benchmark-intelligence-agent/CODEX-*.md`
-
 ## Quick Commands
 
-Python version: **3.11**.
-
-### Setup
+Python version: **3.11**. All commands use `.venv/bin/python`.
 
 ```bash
-python3.11 -m venv .venv
-source .venv/bin/activate
+# Setup
+python3.11 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
-```
+cp .env.example .env.local  # Fill in credentials
 
-### Run pipeline (end-to-end)
-
-```bash
+# Run pipeline (end-to-end)
 .venv/bin/python -m src.main
-```
 
-### Quick validation
+# Local testing (skip Feishu notifications)
+SKIP_FEISHU_PUSH=1 .venv/bin/python -m src.main
 
-```bash
+# Lint / format
+black . && ruff check .
+
+# Tests
+pytest -q                                    # All tests
+pytest tests/ -v                             # Verbose
+pytest tests/test_pdf_enhancer.py -v         # Single file
+pytest tests/test_pdf_enhancer.py::test_name -v  # Single test
+
+# Quick validation (checks code structure)
 bash scripts/quick_validation.sh
 ```
 
-### Lint / format
+## Architecture
 
-```bash
-black .
-ruff check .
+BenchScope runs a daily pipeline via GitHub Actions (UTC 02:00):
+
+```
+main.py orchestrates:
+  Collect → Prefilter → PDF Enhance → LLM Score → Store → Notify
 ```
 
-### Tests
+**Data flow:**
+1. `src/collectors/*` - Concurrent collection (arXiv, GitHub, HuggingFace, HELM, TechEmpower, DBEngines)
+2. `src/prefilter/rule_filter.py` - URL dedup + benchmark heuristics (40-60% filtered)
+3. `src/enhancer/pdf_enhancer.py` - GROBID PDF parsing for arXiv papers
+4. `src/scorer/llm_scorer.py` - GPT-4o-mini 5-dimension scoring with Redis cache
+5. `src/storage/storage_manager.py` - Feishu Bitable (primary) + SQLite (fallback)
+6. `src/notifier/feishu_notifier.py` - Feishu webhook cards
 
-```bash
-pytest -q
-pytest tests/unit -v
-pytest tests/unit/test_something.py -v
-```
+**Key design:** Feishu is the durable "system of record"; SQLite is for degraded operation only.
 
-## Big Picture Architecture
+## Config
 
-BenchScope (Benchmark Intelligence Agent) runs a daily pipeline:
+- `config/sources.yaml` - Data source settings (keywords, time windows, limits)
+- `.env.local` - Credentials (OPENAI_API_KEY, FEISHU_*, GITHUB_TOKEN, REDIS_URL)
 
-1. Collect candidates from multiple sources
-2. Rule-based prefiltering (including URL heuristics)
-3. LLM + rules scoring
-4. Store results to Feishu Bitable (primary) with SQLite fallback
-5. Send Feishu notifications/cards for top candidates
+## Code Conventions
 
-Primary entrypoint: `src/main.py`.
+- Business-logic comments in **Chinese**
+- Function nesting ≤ 3 levels
+- Magic numbers in `src/common/constants.py`
+- Commit format: `type(scope): summary`
 
-Core modules:
+## Critical Constraints
 
-- `src/collectors/*`: source collectors (arXiv, GitHub, HuggingFace, HELM, etc.)
-- `src/prefilter/rule_filter.py`: URL dedup + benchmark heuristics (filters early)
-- `src/scorer/*`: LLM scoring + any domain scorer(s)
-- `src/storage/*`: Feishu Bitable as primary store, SQLite fallback; `StorageManager` coordinates switching
-- `src/notifier/feishu_notifier.py`: Feishu webhook notifications (interactive cards)
-- `src/api/feishu_callback.py`: Feishu callbacks (if enabled/used)
-
-Key design: Feishu is the durable “system of record”; SQLite is for degraded operation.
-
-## Config & Environment
-
-- Source configuration: `config/sources.yaml`
-- Local env vars: `.env.local` (copy from `.env.example`)
-
-Feishu + LLM require credentials (see `.env.example`).
-
-## Repo Conventions (Non-negotiables)
-
-- Key business-logic comments should be in **Chinese**.
-- Keep nesting ≤ 3 levels in Python functions.
-- Avoid magic numbers; prefer `src/common/constants.py` or config.
-
-## Notification Deduplication
-
-Notification deduplication relies on `notification_history.db` and GitHub Actions persistence/validation logic.
-See the recent Phase 17/18 spec docs in `.claude/specs/benchmark-intelligence-agent/` (e.g. `CODEX-PHASE17-NOTIFICATION-DEDUP.md`, `CODEX-P18-NOTIFICATION-DEDUP-FIX.md`).
+1. Feishu API changes require backward-compatible migration
+2. LLM scorer changes need sample input/output comparison
+3. Notification dedup spec: `.claude/specs/benchmark-intelligence-agent/CODEX-P18-NOTIFICATION-DEDUP-FIX.md`

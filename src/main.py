@@ -234,9 +234,7 @@ async def main() -> None:
         logger.info("===== 去重后按来源统计 =====")
         for source, count in sorted(source_counts.items(), key=lambda x: -x[1]):
             collected = sum(1 for c in internal_deduplicated if c.source == source)
-            dup_rate = (
-                (collected - count) / collected * 100 if collected else 0
-            )
+            dup_rate = (collected - count) / collected * 100 if collected else 0
             logger.info(
                 "  %s: %d条新发现 / %d条采集 (去重率%.1f%%)",
                 source.ljust(15),
@@ -291,19 +289,17 @@ async def main() -> None:
     # Step 5: 图片上传已禁用以节省时间
     logger.info("[5/8] 图片上传已跳过，减少耗时")
 
-    # Step 6: 存储入库 (仅保存high/medium优先级，low不入飞书表格)
+    # Step 6: 存储入库 (使用来源感知阈值，不同来源有不同的入库门槛)
     logger.info("[6/8] 存储入库...")
+    qualified, low_filtered_count = _filter_by_source_threshold(scored)
 
-    # 用户需求：低分low不用保存到表格，只保存high/medium
-    high_medium = [c for c in scored if c.priority in ("high", "medium")]
-    low_filtered_count = len(scored) - len(high_medium)
     if low_filtered_count > 0:
         logger.info(
-            "优先级过滤: 跳过%d条low优先级候选 (不保存到飞书表格)",
+            "来源阈值过滤: 跳过%d条低分候选 (按来源使用不同阈值)",
             low_filtered_count,
         )
 
-    actually_saved = await storage.save(high_medium)  # 获取实际写入的记录（去重后）
+    actually_saved = await storage.save(qualified)  # 获取实际写入的记录（去重后）
     await storage.sync_from_sqlite()
     await storage.cleanup()
     logger.info("存储完成: 新增%d条\n", len(actually_saved))
@@ -320,19 +316,37 @@ async def main() -> None:
     # 从实际入库的记录统计优先级
     high_priority = [c for c in actually_saved if c.priority == "high"]
     medium_priority = [c for c in actually_saved if c.priority == "medium"]
-    avg_score = sum(c.total_score for c in actually_saved) / len(actually_saved) if actually_saved else 0
+    low_priority = [c for c in actually_saved if c.priority == "low"]
+    avg_score = (
+        sum(c.total_score for c in actually_saved) / len(actually_saved)
+        if actually_saved
+        else 0
+    )
 
-    # 统计飞书去重跳过的记录数
-    skipped_count = len(scored) - len(actually_saved)
+    # 统计跳过记录数 (来源阈值过滤 + 飞书去重)
+    threshold_filtered = len(scored) - len(qualified)
+    feishu_dedup_skipped = len(qualified) - len(actually_saved)
 
     logger.info("=" * 60)
     logger.info("BenchScope Phase 2 完成")
     logger.info("  采集: %d条", len(all_candidates))
-    logger.info("  去重(Step1.5): %d条新发现 (过滤%d条)", len(deduplicated), duplicate_count)
+    logger.info(
+        "  去重(Step1.5): %d条新发现 (过滤%d条)", len(deduplicated), duplicate_count
+    )
     logger.info("  预筛选: %d条", len(filtered))
     logger.info("  评分: %d条", len(scored))
-    logger.info("  实际入库: %d条 (跳过%d条飞书已存在)", len(actually_saved), skipped_count)
-    logger.info("  推送: 高%d条, 中%d条", len(high_priority), len(medium_priority))
+    logger.info("  来源阈值过滤: 跳过%d条低分", threshold_filtered)
+    logger.info(
+        "  实际入库: %d条 (跳过%d条飞书已存在)",
+        len(actually_saved),
+        feishu_dedup_skipped,
+    )
+    logger.info(
+        "  推送: 高%d条, 中%d条, 低%d条",
+        len(high_priority),
+        len(medium_priority),
+        len(low_priority),
+    )
     logger.info("  平均分: %.2f/10", avg_score)
     logger.info("=" * 60)
 
@@ -348,6 +362,36 @@ def _configure_logging(settings: Settings) -> None:
         format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
         handlers=handlers,
     )
+
+
+def _filter_by_source_threshold(
+    candidates: List[ScoredCandidate],
+) -> tuple[List[ScoredCandidate], int]:
+    """按来源感知阈值过滤候选，不同来源有不同的入库门槛。
+
+    Returns:
+        (qualified_candidates, filtered_count)
+    """
+    qualified: List[ScoredCandidate] = []
+    filtered_count = 0
+
+    for c in candidates:
+        threshold = constants.SOURCE_SCORE_THRESHOLDS.get(
+            c.source, constants.SOURCE_SCORE_THRESHOLDS.get("default", 6.0)
+        )
+        if c.total_score >= threshold:
+            qualified.append(c)
+        else:
+            filtered_count += 1
+            logger.debug(
+                "来源阈值过滤: %s (%.1f < %.1f, source=%s)",
+                c.title[:50],
+                c.total_score,
+                threshold,
+                c.source,
+            )
+
+    return qualified, filtered_count
 
 
 def _apply_freshness_boost(candidate: ScoredCandidate) -> ScoredCandidate:
@@ -426,26 +470,16 @@ def _apply_recency_domain_floor(candidate: ScoredCandidate) -> ScoredCandidate:
     """对近期且任务相关的权威来源设置评分下限，避免因缺少GitHub被过度扣分。
 
     条件：
-    - 来源属于权威/论文类（arxiv/helm/techempower/dbengines/huggingface/semantic_scholar）
-    - MGX相关性 >= 6.0（确保任务领域相关）
-    - 发布距今 <= 30 天
-    下限：活跃度>=4.0，可复现性>=4.5，许可>=3.0
+    - 来源属于权威/论文类（见 AUTHORITY_SOURCES）
+    - MGX相关性 >= AUTHORITY_FLOOR_MIN_RELEVANCE
+    - 发布距今 <= AUTHORITY_FLOOR_MAX_AGE_DAYS
     """
 
-    authority_sources = {
-        "arxiv",
-        "helm",
-        "techempower",
-        "dbengines",
-        "huggingface",
-        "semantic_scholar",
-    }
-
     source = (candidate.source or "").lower()
-    if source not in authority_sources:
+    if source not in constants.AUTHORITY_SOURCES:
         return candidate
 
-    if candidate.relevance_score < 6.0:
+    if candidate.relevance_score < constants.AUTHORITY_FLOOR_MIN_RELEVANCE:
         return candidate
 
     publish_dt = candidate.publish_date
@@ -453,20 +487,32 @@ def _apply_recency_domain_floor(candidate: ScoredCandidate) -> ScoredCandidate:
         return candidate
     if publish_dt.tzinfo is None:
         publish_dt = publish_dt.replace(tzinfo=timezone.utc)
+
     age_days = (datetime.now(tz=publish_dt.tzinfo) - publish_dt).days
-    # 放宽到90天，避免新榜单/论文被过早压分
-    if age_days > 90:
+    if age_days > constants.AUTHORITY_FLOOR_MAX_AGE_DAYS:
         return candidate
 
     # 下限保护（HuggingFace 更高，其他权威源使用基线）
     if source == "huggingface":
-        candidate.activity_score = max(candidate.activity_score, 5.5)
-        candidate.reproducibility_score = max(candidate.reproducibility_score, 5.5)
-        candidate.license_score = max(candidate.license_score, 4.5)
+        candidate.activity_score = max(
+            candidate.activity_score, constants.HF_FLOOR_ACTIVITY
+        )
+        candidate.reproducibility_score = max(
+            candidate.reproducibility_score, constants.HF_FLOOR_REPRODUCIBILITY
+        )
+        candidate.license_score = max(
+            candidate.license_score, constants.HF_FLOOR_LICENSE
+        )
     else:
-        candidate.activity_score = max(candidate.activity_score, 4.5)
-        candidate.reproducibility_score = max(candidate.reproducibility_score, 5.0)
-        candidate.license_score = max(candidate.license_score, 3.5)
+        candidate.activity_score = max(
+            candidate.activity_score, constants.AUTHORITY_FLOOR_ACTIVITY
+        )
+        candidate.reproducibility_score = max(
+            candidate.reproducibility_score, constants.AUTHORITY_FLOOR_REPRODUCIBILITY
+        )
+        candidate.license_score = max(
+            candidate.license_score, constants.AUTHORITY_FLOOR_LICENSE
+        )
 
     # 若已有新鲜度加权(custom_total_score)未设或偏低，则用下限重算
     weights = constants.SCORE_WEIGHTS

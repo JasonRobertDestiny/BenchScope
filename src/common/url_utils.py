@@ -58,9 +58,7 @@ def canonicalize_url(url: str | None) -> str:
         for k, v in parse_qsl(parts.query, keep_blank_values=True)
         if k not in _TRACKING_PARAMS
     ]
-    cleaned_query = "&".join(
-        f"{k}={v}" if v != "" else k for k, v in query_pairs
-    )
+    cleaned_query = "&".join(f"{k}={v}" if v != "" else k for k, v in query_pairs)
 
     # 统一大小写并移除末尾斜杠
     normalized_path = parts.path.rstrip("/") or "/"

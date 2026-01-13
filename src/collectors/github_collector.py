@@ -206,11 +206,15 @@ class GitHubCollector:
         readme_meta = self._extract_raw_metadata(readme_text)
 
         # 从README中提取数据集URL
-        dataset_url = URLExtractor.extract_dataset_url(readme_text) if readme_text else None
+        dataset_url = (
+            URLExtractor.extract_dataset_url(readme_text) if readme_text else None
+        )
 
         # 清理README文本（去除HTML/Markdown噪声）
         # 这是为了解决飞书表格中abstract字段被污染的问题（包含<!-- <p align="center"> <img alt=... 等HTML标签）
-        cleaned_abstract = clean_summary_text(readme_text, max_length=2000) if readme_text else None
+        cleaned_abstract = (
+            clean_summary_text(readme_text, max_length=2000) if readme_text else None
+        )
 
         return RawCandidate(
             title=repo.get("full_name", ""),
@@ -390,7 +394,9 @@ class GitHubCollector:
                 dataset_size = size_match.group(0).strip()
                 break
 
-        return ReadmeExtraction(metrics=metrics, baselines=baselines, dataset_size=dataset_size)
+        return ReadmeExtraction(
+            metrics=metrics, baselines=baselines, dataset_size=dataset_size
+        )
 
     @staticmethod
     def _extract_task_type(text: str) -> str | None:

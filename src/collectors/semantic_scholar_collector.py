@@ -103,7 +103,9 @@ class SemanticScholarCollector:
         paper_url = paper.get("url")
 
         fields_of_study = paper.get("fieldsOfStudy") or []
-        fields_str = ",".join(str(item) for item in fields_of_study) if fields_of_study else ""
+        fields_str = (
+            ",".join(str(item) for item in fields_of_study) if fields_of_study else ""
+        )
         raw_metadata = {
             "paper_id": str(paper.get("paperId") or ""),
             "venue": str(paper.get("venue") or ""),

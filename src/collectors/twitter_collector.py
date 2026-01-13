@@ -64,8 +64,12 @@ class TwitterCollector:
             self.enabled = twitter_cfg.enabled
             self.lookback_days = twitter_cfg.lookback_days
             self.max_results_per_query = twitter_cfg.max_results_per_query
-            self.tier1_queries = twitter_cfg.tier1_queries or constants.TWITTER_TIER1_QUERIES
-            self.tier2_queries = twitter_cfg.tier2_queries or constants.TWITTER_TIER2_QUERIES
+            self.tier1_queries = (
+                twitter_cfg.tier1_queries or constants.TWITTER_TIER1_QUERIES
+            )
+            self.tier2_queries = (
+                twitter_cfg.tier2_queries or constants.TWITTER_TIER2_QUERIES
+            )
             self.min_likes = twitter_cfg.min_likes
             self.min_retweets = twitter_cfg.min_retweets
             self.must_have_url = twitter_cfg.must_have_url
@@ -73,10 +77,9 @@ class TwitterCollector:
             self.rate_limit_delay = twitter_cfg.rate_limit_delay
 
         # Bearer Token: 优先从 Settings, 其次从环境变量读取
-        self.bearer_token = (
-            getattr(self.settings, "twitter_bearer_token", None)
-            or os.getenv("TWITTER_BEARER_TOKEN")
-        )
+        self.bearer_token = getattr(
+            self.settings, "twitter_bearer_token", None
+        ) or os.getenv("TWITTER_BEARER_TOKEN")
 
         # 仅在启用时强制要求 Token, 便于在未配置 Twitter 时仍能运行其他采集器
         if self.enabled and not self.bearer_token:
@@ -145,9 +148,7 @@ class TwitterCollector:
                 candidate = self._to_candidate(tweet)
                 candidates.append(candidate)
             except Exception as exc:  # noqa: BLE001
-                logger.warning(
-                    "Twitter 推文转换失败(id=%s): %s", tweet.get("id"), exc
-                )
+                logger.warning("Twitter 推文转换失败(id=%s): %s", tweet.get("id"), exc)
 
         logger.info("✓ Twitter采集完成,有效候选 %s 条", len(candidates))
         return candidates
@@ -161,8 +162,10 @@ class TwitterCollector:
 
         # 计算时间窗口 (UTC)
         start_time = (
-            datetime.now(timezone.utc) - timedelta(days=self.lookback_days)
-        ).isoformat().replace("+00:00", "Z")
+            (datetime.now(timezone.utc) - timedelta(days=self.lookback_days))
+            .isoformat()
+            .replace("+00:00", "Z")
+        )
 
         params = {
             "query": f"{query} lang:{self.language} -is:retweet",

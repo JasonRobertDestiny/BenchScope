@@ -109,8 +109,7 @@ class BackendBenchmarkScorer:
         if candidate.dataset_url:
             score += 2.0
         license_value = (
-            (candidate.license_type or "")
-            or candidate.raw_metadata.get("license", "")
+            (candidate.license_type or "") or candidate.raw_metadata.get("license", "")
         ).lower()
         if any(keyword in license_value for keyword in ["mit", "apache", "bsd"]):
             score += 1.5
@@ -169,9 +168,7 @@ class BackendBenchmarkScorer:
             "industry_adoption": "行业采用度",
             "relevance": "MGX相关性",
         }
-        highlights = ", ".join(
-            f"{mapping[dim]} {score:.1f}" for dim, score in top_dims
-        )
+        highlights = ", ".join(f"{mapping[dim]} {score:.1f}" for dim, score in top_dims)
         return f"后端专项评分：{highlights}"
 
     def _to_scored_candidate(

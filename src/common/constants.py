@@ -44,7 +44,11 @@ HUGGINGFACE_TIMEOUT_SECONDS: Final[int] = 20
 HUGGINGFACE_HTTP_MAX_RETRIES: Final[int] = 2  # P15: 网络抖动时最多重试1次
 HUGGINGFACE_HTTP_RETRY_DELAY_SECONDS: Final[float] = 2.0  # P15: HuggingFace重试等待(秒)
 ARXIV_MAX_RETRIES: Final[int] = 3
-ARXIV_RETRY_DELAYS_SECONDS: Final[tuple[int, ...]] = (5, 10, 15)  # 指数退避: 5s, 10s, 15s
+ARXIV_RETRY_DELAYS_SECONDS: Final[tuple[int, ...]] = (
+    5,
+    10,
+    15,
+)  # 指数退避: 5s, 10s, 15s
 ARXIV_PAGE_SIZE_LIMIT: Final[int] = 2000  # arXiv API单页最大结果数上限
 ARXIV_LOOKBACK_HOURS: Final[int] = 168  # 7天窗口，相关论文发布频率低
 ARXIV_KEYWORDS: Final[list[str]] = [
@@ -612,6 +616,32 @@ BENCHMARK_POSITIVE_SIGNALS: Final[list[str]] = [
 # 相关性硬下限（低于此分数不入库）
 RELEVANCE_HARD_FLOOR: Final[float] = 2.0  # 临时降低到2.0以测试推送功能
 
+# ============================================================
+# 权威来源配置（用于分数兜底保护）
+# ============================================================
+AUTHORITY_SOURCES: Final[set[str]] = {
+    "arxiv",
+    "helm",
+    "techempower",
+    "dbengines",
+    "huggingface",
+    "semantic_scholar",
+}
+
+# 权威来源分数下限保护（90天内+相关性>=6.0时应用）
+AUTHORITY_FLOOR_MIN_RELEVANCE: Final[float] = 6.0
+AUTHORITY_FLOOR_MAX_AGE_DAYS: Final[int] = 90
+
+# 通用权威源下限
+AUTHORITY_FLOOR_ACTIVITY: Final[float] = 4.5
+AUTHORITY_FLOOR_REPRODUCIBILITY: Final[float] = 5.0
+AUTHORITY_FLOOR_LICENSE: Final[float] = 3.5
+
+# HuggingFace专用下限（更高）
+HF_FLOOR_ACTIVITY: Final[float] = 5.5
+HF_FLOOR_REPRODUCIBILITY: Final[float] = 5.5
+HF_FLOOR_LICENSE: Final[float] = 4.5
+
 # ---- 存储与通知 ----
 FEISHU_BATCH_SIZE: Final[int] = 20
 FEISHU_RATE_LIMIT_SECONDS: Final[float] = 0.6
@@ -731,9 +761,7 @@ FEISHU_LOW_PICK_PER_SOURCE: Final[dict[str, int]] = {
 }
 # 推送过滤与质量控制
 PUSH_MAX_AGE_DAYS: Final[int] = 30  # 超过30天仅保留高分(>=8)的历史优质项
-PUSH_RELEVANCE_FLOOR: Final[float] = (
-    2.0  # 临时降低到2.0以测试推送功能
-)
+PUSH_RELEVANCE_FLOOR: Final[float] = 2.0  # 临时降低到2.0以测试推送功能
 PUSH_TOTAL_CAP: Final[int] = 15  # 单次推送总条数上限
 
 # 推送卡片UX（方案B：两分区）

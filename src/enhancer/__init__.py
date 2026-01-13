@@ -6,4 +6,3 @@
 from src.enhancer.pdf_enhancer import PDFContent, PDFEnhancer
 
 __all__ = ["PDFContent", "PDFEnhancer"]
-

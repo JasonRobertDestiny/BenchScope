@@ -14,6 +14,7 @@ from typing import List, Optional
 import httpx
 
 from src.common import constants
+from src.common.datetime_utils import calculate_age_days
 from src.common.url_utils import canonicalize_url
 from src.config import Settings, get_settings
 from src.models import ScoredCandidate
@@ -52,8 +53,7 @@ class FeishuNotifier:
         # 通知历史过滤：已通知过的URL永久过滤，确保用户只看到新鲜内容
         before_history_filter = len(candidates)
         candidates = [
-            c for c in candidates
-            if self.notification_history.should_notify(c.url)
+            c for c in candidates if self.notification_history.should_notify(c.url)
         ]
         history_filtered_count = before_history_filter - len(candidates)
         if history_filtered_count > 0:
@@ -76,8 +76,8 @@ class FeishuNotifier:
             medium_priority = [c for c in qualified if c.priority == "medium"]
             low_priority = [c for c in qualified if c.priority == "low"]
         else:
-            high_priority, medium_priority, low_priority = self._smart_filter_candidates(
-                candidates
+            high_priority, medium_priority, low_priority = (
+                self._smart_filter_candidates(candidates)
             )
 
         if not high_priority and not medium_priority:
@@ -97,7 +97,9 @@ class FeishuNotifier:
                 self._record_notified(candidate)
                 successfully_notified.append(candidate)
             except Exception as e:
-                logger.warning("高优卡片推送失败，跳过: %s - %s", candidate.title[:30], e)
+                logger.warning(
+                    "高优卡片推送失败，跳过: %s - %s", candidate.title[:30], e
+                )
             await asyncio.sleep(constants.FEISHU_RATE_LIMIT_DELAY)
 
         # 2. 推送中优先级摘要
@@ -117,8 +119,6 @@ class FeishuNotifier:
         # 3. 推送统计摘要卡片 (支持markdown)
         if successfully_notified:
             summary_candidates = self._dedup_by_url(successfully_notified)
-            high_count = sum(1 for c in successfully_notified if c.priority == "high")
-            medium_count = len(successfully_notified) - high_count
             summary_card = self._build_summary_card(
                 summary_candidates,
                 [c for c in successfully_notified if c.priority == "high"],
@@ -266,7 +266,22 @@ class FeishuNotifier:
             return candidate.github_url
         return ""
 
-    def _prefilter_for_push(self, candidates: List[ScoredCandidate]) -> List[ScoredCandidate]:
+    @staticmethod
+    def _qualifies_for_direct_pass(
+        cand: ScoredCandidate, age_days: Optional[int], core_domain: bool
+    ) -> bool:
+        """判断候选是否满足直通条件（高相关/高新颖+核心域+最新）"""
+        if age_days is None or not core_domain:
+            return False
+        if age_days <= 7 and cand.relevance_score >= 7.0:
+            return True
+        if age_days <= 14 and cand.novelty_score >= 8.0:
+            return True
+        return False
+
+    def _prefilter_for_push(
+        self, candidates: List[ScoredCandidate]
+    ) -> List[ScoredCandidate]:
         """推送前过滤：最新优先、相关性兜底、任务域白名单、总量限额。
 
         规则：
@@ -293,24 +308,14 @@ class FeishuNotifier:
             if cand.relevance_score < constants.PUSH_RELEVANCE_FLOOR:
                 continue
 
-            # 时间过滤
-            publish_dt = cand.publish_date
-            age_days = None
-            if publish_dt:
-                if publish_dt.tzinfo is None:
-                    publish_dt = publish_dt.replace(tzinfo=timezone.utc)
-                age_days = (datetime.now(tz=publish_dt.tzinfo) - publish_dt).days
+            age_days = calculate_age_days(cand.publish_date)
             domain = cand.task_domain or constants.DEFAULT_TASK_DOMAIN
             core_domain = domain in core_domains
 
             # 最新高相关/高新颖直通
-            if age_days is not None:
-                if age_days <= 7 and cand.relevance_score >= 7.0 and core_domain:
-                    filtered.append(cand)
-                    continue
-                if age_days <= 14 and cand.novelty_score >= 8.0 and core_domain:
-                    filtered.append(cand)
-                    continue
+            if self._qualifies_for_direct_pass(cand, age_days, core_domain):
+                filtered.append(cand)
+                continue
 
             # 核心域放宽阈值
             if core_domain and cand.total_score >= 5.0:
@@ -331,10 +336,14 @@ class FeishuNotifier:
 
         # === Phase 10新增: Other领域特殊处理 ===
         other_candidates = [
-            c for c in filtered if (c.task_domain or constants.DEFAULT_TASK_DOMAIN) == "Other"
+            c
+            for c in filtered
+            if (c.task_domain or constants.DEFAULT_TASK_DOMAIN) == "Other"
         ]
         non_other_candidates = [
-            c for c in filtered if (c.task_domain or constants.DEFAULT_TASK_DOMAIN) != "Other"
+            c
+            for c in filtered
+            if (c.task_domain or constants.DEFAULT_TASK_DOMAIN) != "Other"
         ]
 
         # Other领域相关性门槛提高
@@ -345,9 +354,9 @@ class FeishuNotifier:
         ]
 
         # 按相关性排序后限量
-        other_qualified = sorted(
-            other_qualified, key=lambda c: -c.relevance_score
-        )[: constants.OTHER_DOMAIN_MAX_COUNT]
+        other_qualified = sorted(other_qualified, key=lambda c: -c.relevance_score)[
+            : constants.OTHER_DOMAIN_MAX_COUNT
+        ]
 
         filtered = non_other_candidates + other_qualified
 
@@ -372,14 +381,20 @@ class FeishuNotifier:
         if total_count > 0:
             max_other = int(total_count * constants.OTHER_DOMAIN_MAX_RATIO)
             other_in_filtered = [
-                c for c in filtered if (c.task_domain or constants.DEFAULT_TASK_DOMAIN) == "Other"
+                c
+                for c in filtered
+                if (c.task_domain or constants.DEFAULT_TASK_DOMAIN) == "Other"
             ]
             if len(other_in_filtered) > max_other:
-                other_sorted = sorted(other_in_filtered, key=lambda c: c.relevance_score)
+                other_sorted = sorted(
+                    other_in_filtered, key=lambda c: c.relevance_score
+                )
                 remove_count = len(other_in_filtered) - max_other
                 remove_set = {id(c) for c in other_sorted[:remove_count]}
                 filtered = [c for c in filtered if id(c) not in remove_set]
-                logger.info("Other领域占比限制: 移除%d条低相关性Other候选", remove_count)
+                logger.info(
+                    "Other领域占比限制: 移除%d条低相关性Other候选", remove_count
+                )
 
         # 总量上限
         if len(filtered) > constants.PUSH_TOTAL_CAP:
@@ -417,7 +432,10 @@ class FeishuNotifier:
             )
             if cand.total_score < threshold:
                 continue
-            if source == "arxiv" and cand.relevance_score < constants.ARXIV_MIN_RELEVANCE:
+            if (
+                source == "arxiv"
+                and cand.relevance_score < constants.ARXIV_MIN_RELEVANCE
+            ):
                 continue
             promoted.append(cand)
             medium.append(cand)
@@ -612,9 +630,11 @@ class FeishuNotifier:
             source = (cand.source or "unknown").lower()
             if source not in per_source_limits:
                 continue
-            if cand.publish_date and (
-                datetime.now() - cand.publish_date
-            ).days > constants.PAPER_MAX_PUBLISH_DAYS_FOR_LOW_PICK:
+            if (
+                cand.publish_date
+                and (datetime.now() - cand.publish_date).days
+                > constants.PAPER_MAX_PUBLISH_DAYS_FOR_LOW_PICK
+            ):
                 continue
             if cand.total_score < constants.PAPER_MIN_SCORE_FOR_LOW_PICK:
                 continue
@@ -633,7 +653,9 @@ class FeishuNotifier:
                 )
                 source_name = self._format_source_name(cand.source)
                 date_str = (
-                    cand.publish_date.strftime("%Y-%m-%d") if cand.publish_date else "近期"
+                    cand.publish_date.strftime("%Y-%m-%d")
+                    if cand.publish_date
+                    else "近期"
                 )
                 picks.append(
                     f"- {source_name}: {title} （MGX {cand.relevance_score:.1f}, {date_str}） [查看详情]({self._primary_link(cand)})"
@@ -641,7 +663,9 @@ class FeishuNotifier:
 
         return "\n".join(picks)
 
-    def _render_brief_items(self, items: List[ScoredCandidate], tag: str | None = None) -> List[str]:
+    def _render_brief_items(
+        self, items: List[ScoredCandidate], tag: str | None = None
+    ) -> List[str]:
         """简洁行渲染，提升可扫读性。"""
 
         lines: list[str] = []
@@ -659,7 +683,11 @@ class FeishuNotifier:
             label_str = "/".join(labels) if labels else ""
 
             date_str = c.publish_date.strftime("%Y-%m-%d") if c.publish_date else "近期"
-            meta = f"[{source_name}] {domain}｜{c.total_score:.1f}分" + (f"｜{label_str}" if label_str else "") + f"｜{date_str}"
+            meta = (
+                f"[{source_name}] {domain}｜{c.total_score:.1f}分"
+                + (f"｜{label_str}" if label_str else "")
+                + f"｜{date_str}"
+            )
             subs = (
                 f"相关 {c.relevance_score:.1f}｜新颖 {c.novelty_score:.1f}｜"
                 f"活跃 {c.activity_score:.1f}｜复现 {c.reproducibility_score:.1f}"
@@ -703,7 +731,10 @@ class FeishuNotifier:
                 cand_domain = cand.task_domain or constants.DEFAULT_TASK_DOMAIN
                 if cand_domain != domain:
                     continue
-                if not allow_any_score and cand.total_score < constants.TASK_FILL_MIN_SCORE:
+                if (
+                    not allow_any_score
+                    and cand.total_score < constants.TASK_FILL_MIN_SCORE
+                ):
                     continue
                 date_str = (
                     cand.publish_date.strftime("%Y-%m-%d")
@@ -739,7 +770,9 @@ class FeishuNotifier:
             source_counts[c.source] = source_counts.get(c.source, 0) + 1
         source_items = [
             f"{self._format_source_name(src)} {cnt}"
-            for src, cnt in sorted(source_counts.items(), key=lambda x: x[1], reverse=True)
+            for src, cnt in sorted(
+                source_counts.items(), key=lambda x: x[1], reverse=True
+            )
         ]
         source_breakdown = "  |  ".join(source_items)
 
@@ -838,8 +871,12 @@ class FeishuNotifier:
         )
 
         elements = []
-        elements.append({"tag": "div", "text": {"tag": "lark_md", "content": title_content}})
-        elements.append({"tag": "div", "text": {"tag": "lark_md", "content": detail_content}})
+        elements.append(
+            {"tag": "div", "text": {"tag": "lark_md", "content": title_content}}
+        )
+        elements.append(
+            {"tag": "div", "text": {"tag": "lark_md", "content": detail_content}}
+        )
         elements.append({"tag": "hr"})
         elements.append({"tag": "action", "actions": actions})
         elements.append(
